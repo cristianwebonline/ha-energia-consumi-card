@@ -11,7 +11,7 @@
  *    soglia_alta: 66              # % barra rossa
  *    lampeggio_record: true       # 👑 lampeggio giorno record
  */
-const CARD_VERSION = "1.0.2";
+const CARD_VERSION = "1.0.3";
 console.info(`%c ENERGIA-CONSUMI-CARD %c v${CARD_VERSION} `,
   "color:#241200;background:#ff8a3d;font-weight:700;border-radius:4px 0 0 4px",
   "color:#ffb020;background:#1a1b21;border-radius:0 4px 4px 0");
@@ -230,6 +230,12 @@ class EnergiaConsumiCard extends HTMLElement {
     const back = d.meta.length ? d.meta[d.meta.length - 1].date : rec.date;
     if (rec.date === cur) chip.classList.add("iscur");
     chip.onclick = () => { this._curDay = (this._curDay === rec.date) ? back : rec.date; this._render(); this._scrollSel(); };
+    // Evita che lo scroll orizzontale dei giorni venga letto da hass-swipe-navigation
+    // (o simili) come uno swipe di cambio-vista: fermiamo la propagazione del gesto
+    // touch/pointer qui, la card scrolla comunque da sola.
+    const daysEl = this._root.querySelector(".eca-days");
+    ["touchstart", "touchmove", "touchend", "pointerdown", "pointermove"].forEach(evt =>
+      daysEl.addEventListener(evt, e => e.stopPropagation(), { passive: true }));
     this._scrollSel();
   }
 
@@ -283,7 +289,7 @@ class EnergiaConsumiCard extends HTMLElement {
     .eca-u{font-size:13px;color:var(--eca-muted);font-weight:700;margin-left:2px}
     .eca-cost{font-size:14px;font-weight:800;color:var(--eca-acc2);margin-top:3px;font-variant-numeric:tabular-nums}
     .eca-cap{font-size:9.5px;letter-spacing:1.5px;text-transform:uppercase;color:var(--eca-faint);font-weight:800;margin-top:3px}
-    .eca-days{display:flex;gap:8px;overflow-x:auto;padding:6px 2px 8px;scrollbar-width:none}
+    .eca-days{display:flex;gap:8px;overflow-x:auto;padding:6px 2px 8px;scrollbar-width:none;touch-action:pan-x}
     .eca-days::-webkit-scrollbar{display:none}
     .eca-day{position:relative;flex:0 0 auto;min-width:66px;padding:10px 12px;border-radius:16px;cursor:pointer;
       background:var(--eca-panel);border:1px solid var(--eca-stroke);display:flex;flex-direction:column;gap:5px;
