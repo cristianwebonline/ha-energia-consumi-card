@@ -11,7 +11,7 @@
  *    soglia_alta: 66              # % barra rossa
  *    lampeggio_record: true       # 👑 lampeggio giorno record
  */
-const CARD_VERSION = "1.0.1";
+const CARD_VERSION = "1.0.2";
 console.info(`%c ENERGIA-CONSUMI-CARD %c v${CARD_VERSION} `,
   "color:#241200;background:#ff8a3d;font-weight:700;border-radius:4px 0 0 4px",
   "color:#ffb020;background:#1a1b21;border-radius:0 4px 4px 0");
@@ -43,6 +43,13 @@ class EnergiaConsumiCard extends HTMLElement {
   }
 
   getCardSize() { return 9; }
+
+  // editor visuale nativo (compare quando modifichi la card nella dashboard)
+  static getConfigElement() { return document.createElement("energia-consumi-card-editor"); }
+  static getStubConfig() {
+    return { type: "custom:energia-consumi-card", title: "Consumi di casa",
+      days_back: 8, open_on: "today", prezzo_kwh: 0.30, soglia_media: 33, soglia_alta: 66, lampeggio_record: true };
+  }
 
   async _boot() {
     this.innerHTML = this._shellHTML();
@@ -212,8 +219,7 @@ class EnergiaConsumiCard extends HTMLElement {
         <p class="eca-hint">Tocca un'ora per vedere quale elettrodomestico ha consumato di più</p>
         <div class="eca-chart">${chartHTML}</div></div>
       <div class="eca-panel"><h2>🏆 Classifica elettrodomestici</h2>
-        <p class="eca-hint">Del giorno selezionato</p><div class="eca-rank">${this._rankHTML(d.perDayRank[cur])}</div></div>
-      <div class="eca-add">➕ Aggiungi sensori di consumo</div>`;
+        <p class="eca-hint">Del giorno selezionato</p><div class="eca-rank">${this._rankHTML(d.perDayRank[cur])}</div></div>`;
 
     // eventi
     this._root.querySelectorAll(".eca-day").forEach(el =>
@@ -224,8 +230,6 @@ class EnergiaConsumiCard extends HTMLElement {
     const back = d.meta.length ? d.meta[d.meta.length - 1].date : rec.date;
     if (rec.date === cur) chip.classList.add("iscur");
     chip.onclick = () => { this._curDay = (this._curDay === rec.date) ? back : rec.date; this._render(); this._scrollSel(); };
-    const add = this._root.querySelector(".eca-add");
-    if (add) add.onclick = () => this._nav("/config/energy/dashboard");
     this._scrollSel();
   }
 
@@ -353,10 +357,90 @@ class EnergiaConsumiCard extends HTMLElement {
   }
 }
 
+// ===========================================================================
+// Editor visuale della card (impostazioni) — compare in modifica dashboard
+// ===========================================================================
+class EnergiaConsumiCardEditor extends HTMLElement {
+  setConfig(config) { this._config = Object.assign({}, config); this._render(); }
+  set hass(h) { this._hass = h; }
+
+  _emit() {
+    this.dispatchEvent(new CustomEvent("config-changed", {
+      detail: { config: this._config }, bubbles: true, composed: true,
+    }));
+  }
+  _set(key, val) { this._config = Object.assign({}, this._config, { [key]: val }); this._emit(); }
+  _nav(path) {
+    try { history.pushState(null, "", path); this.dispatchEvent(new Event("location-changed", { bubbles: true, composed: true })); }
+    catch (e) { window.location.href = path; }
+  }
+
+  _render() {
+    const c = this._config || {};
+    const g = (k, d) => (c[k] !== undefined ? c[k] : d);
+    this.innerHTML = `<style>
+      .ece{display:flex;flex-direction:column;gap:14px;padding:6px 2px;font-family:inherit}
+      .ece .fld{display:flex;flex-direction:column;gap:6px}
+      .ece label{font-size:13px;font-weight:600;color:var(--primary-text-color)}
+      .ece .h{font-size:11px;color:var(--secondary-text-color);font-weight:400}
+      .ece input,.ece select{padding:10px 11px;border-radius:8px;font-size:15px;font-family:inherit;
+        border:1px solid var(--divider-color);background:var(--card-background-color);color:var(--primary-text-color)}
+      .ece .row{display:flex;gap:12px}.ece .row>.fld{flex:1}
+      .ece .sw{display:flex;align-items:center;justify-content:space-between;gap:10px;font-size:14px;font-weight:600;color:var(--primary-text-color)}
+      .ece .addbtn{display:flex;align-items:center;justify-content:center;gap:8px;padding:13px;border-radius:12px;cursor:pointer;
+        font-size:14px;font-weight:700;color:#fff;background:var(--primary-color);border:none;margin-top:4px}
+      .ece .sep{height:1px;background:var(--divider-color);margin:2px 0}
+      .ece .note{font-size:11.5px;color:var(--secondary-text-color);line-height:1.5}
+    </style>
+    <div class="ece">
+      <div class="fld"><label>Titolo</label>
+        <input type="text" id="f_title" value="${(g("title","Consumi di casa")+"").replace(/"/g,"&quot;")}"></div>
+      <div class="row">
+        <div class="fld"><label>Giorni</label>
+          <select id="f_days"><option value="7"${g("days_back",8)==7?" selected":""}>7 giorni</option>
+            <option value="14"${g("days_back",8)==14?" selected":""}>14 giorni</option>
+            <option value="30"${g("days_back",8)==30?" selected":""}>30 giorni</option>
+            ${[7,14,30].includes(+g("days_back",8))?"":`<option value="${g("days_back",8)}" selected>${g("days_back",8)} giorni</option>`}
+          </select></div>
+        <div class="fld"><label>All'apertura</label>
+          <select id="f_open"><option value="today"${g("open_on","today")==="today"?" selected":""}>Oggi</option>
+            <option value="record"${g("open_on","today")==="record"?" selected":""}>Giorno record</option></select></div>
+      </div>
+      <div class="fld"><label>Prezzo energia (€/kWh)</label>
+        <span class="h">Costo orientativo accanto ai kWh (media mercato ~0,30)</span>
+        <input type="number" id="f_price" step="0.01" min="0" max="5" value="${g("prezzo_kwh",0.30)}"></div>
+      <div class="row">
+        <div class="fld"><label>Soglia gialla (%)</label>
+          <input type="number" id="f_smid" min="5" max="95" value="${g("soglia_media",33)}"></div>
+        <div class="fld"><label>Soglia rossa (%)</label>
+          <input type="number" id="f_shigh" min="10" max="100" value="${g("soglia_alta",66)}"></div>
+      </div>
+      <div class="sw">👑 Lampeggio giorno record
+        <input type="checkbox" id="f_blink" ${g("lampeggio_record",true)?"checked":""}></div>
+      <div class="sep"></div>
+      <button class="addbtn" id="f_add">➕ Aggiungi sensori di consumo</button>
+      <div class="note">Apre la pagina Energia di Home Assistant dove aggiungi/togli le prese monitorate. La card si aggiorna da sola.</div>
+    </div>`;
+
+    const on = (id, ev, fn) => { const el = this.querySelector(id); if (el) el.addEventListener(ev, fn); };
+    on("#f_title", "input", e => this._set("title", e.target.value));
+    on("#f_days", "change", e => this._set("days_back", parseInt(e.target.value)));
+    on("#f_open", "change", e => this._set("open_on", e.target.value));
+    on("#f_price", "change", e => this._set("prezzo_kwh", parseFloat(String(e.target.value).replace(",", ".")) || 0.30));
+    on("#f_smid", "change", e => this._set("soglia_media", parseInt(e.target.value) || 33));
+    on("#f_shigh", "change", e => this._set("soglia_alta", parseInt(e.target.value) || 66));
+    on("#f_blink", "change", e => this._set("lampeggio_record", e.target.checked));
+    on("#f_add", "click", () => this._nav("/config/energy/dashboard"));
+  }
+}
+customElements.define("energia-consumi-card-editor", EnergiaConsumiCardEditor);
+
 customElements.define("energia-consumi-card", EnergiaConsumiCard);
 window.customCards = window.customCards || [];
 window.customCards.push({
   type: "energia-consumi-card",
   name: "Energia Consumi Card",
   description: "Consumi di casa interattivi: giorni, ore, popup elettrodomestici, costo €.",
+  preview: true,
+  documentationURL: "https://github.com/cristianwebonline/ha-energia-consumi-card",
 });
