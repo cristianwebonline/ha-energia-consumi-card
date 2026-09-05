@@ -11,7 +11,7 @@
  *    soglia_alta: 66              # % barra rossa
  *    lampeggio_record: true       # 👑 lampeggio giorno record
  */
-const CARD_VERSION = "1.0.0";
+const CARD_VERSION = "1.0.1";
 console.info(`%c ENERGIA-CONSUMI-CARD %c v${CARD_VERSION} `,
   "color:#241200;background:#ff8a3d;font-weight:700;border-radius:4px 0 0 4px",
   "color:#ffb020;background:#1a1b21;border-radius:0 4px 4px 0");
@@ -212,7 +212,8 @@ class EnergiaConsumiCard extends HTMLElement {
         <p class="eca-hint">Tocca un'ora per vedere quale elettrodomestico ha consumato di più</p>
         <div class="eca-chart">${chartHTML}</div></div>
       <div class="eca-panel"><h2>🏆 Classifica elettrodomestici</h2>
-        <p class="eca-hint">Del giorno selezionato</p><div class="eca-rank">${this._rankHTML(d.perDayRank[cur])}</div></div>`;
+        <p class="eca-hint">Del giorno selezionato</p><div class="eca-rank">${this._rankHTML(d.perDayRank[cur])}</div></div>
+      <div class="eca-add">➕ Aggiungi sensori di consumo</div>`;
 
     // eventi
     this._root.querySelectorAll(".eca-day").forEach(el =>
@@ -223,7 +224,17 @@ class EnergiaConsumiCard extends HTMLElement {
     const back = d.meta.length ? d.meta[d.meta.length - 1].date : rec.date;
     if (rec.date === cur) chip.classList.add("iscur");
     chip.onclick = () => { this._curDay = (this._curDay === rec.date) ? back : rec.date; this._render(); this._scrollSel(); };
+    const add = this._root.querySelector(".eca-add");
+    if (add) add.onclick = () => this._nav("/config/energy/dashboard");
     this._scrollSel();
+  }
+
+  // navigazione SPA dentro HA (verso la pagina di configurazione Energia)
+  _nav(path) {
+    try {
+      history.pushState(null, "", path);
+      this.dispatchEvent(new Event("location-changed", { bubbles: true, composed: true }));
+    } catch (e) { window.location.href = path; }
   }
 
   _scrollSel() {
@@ -320,6 +331,10 @@ class EnergiaConsumiCard extends HTMLElement {
     .eca-kv small{color:var(--eca-faint);font-weight:600;font-size:10px;margin-left:2px}
     .eca-eur{display:block;font-size:11px;font-weight:700;color:var(--eca-acc2);margin-top:2px}
     .eca-empty{color:var(--eca-muted);font-size:13px;text-align:center;padding:18px 0}
+    .eca-add{display:flex;align-items:center;justify-content:center;gap:8px;padding:13px;border-radius:16px;cursor:pointer;
+      font-size:14px;font-weight:800;color:#ffd7b0;background:linear-gradient(135deg,rgba(255,138,61,.16),rgba(255,176,32,.10));
+      border:1px solid rgba(255,138,61,.32);transition:transform .15s,filter .15s}
+    .eca-add:hover{transform:translateY(-1px);filter:brightness(1.1)}
     .eca-err{color:var(--eca-muted);text-align:center;padding:40px 10px;font-size:14px}
     .eca-scrim{position:fixed;inset:0;background:rgba(4,5,8,.62);backdrop-filter:blur(6px);display:flex;
       align-items:center;justify-content:center;padding:22px;z-index:9;opacity:0;pointer-events:none;transition:opacity .18s}
