@@ -11,7 +11,7 @@
  *    soglia_alta: 66              # % barra rossa
  *    lampeggio_record: true       # 👑 lampeggio giorno record
  */
-const CARD_VERSION = "1.0.5";
+const CARD_VERSION = "1.0.6";
 console.info(`%c ENERGIA-CONSUMI-CARD %c v${CARD_VERSION} `,
   "color:#241200;background:#ff8a3d;font-weight:700;border-radius:4px 0 0 4px",
   "color:#ffb020;background:#1a1b21;border-radius:0 4px 4px 0");
@@ -23,13 +23,19 @@ const WD = ["Lun", "Mar", "Mer", "Gio", "Ven", "Sab", "Dom"];
 // propagazione del gesto qui (senza preventDefault): lo scroll verticale della pagina
 // e i tap sui pulsanti continuano a funzionare normalmente, solo il "bubbling" verso
 // i listener globali della libreria viene interrotto.
+// hass-swipe-navigation stesso ignora già i gesti dentro <hui-card-edit-mode>
+// (il wrapper che HA mette intorno alle card quando la dashboard è in
+// modifica, per non rubare il drag-and-drop di riordino) — controllando lì
+// dentro NON dobbiamo bloccare nulla noi. Il tentativo precedente (guardare
+// "edit=1" nell'URL) era sbagliato: le dashboard "sections" non cambiano
+// l'URL entrando in modifica, per questo il riordino restava bloccato.
+function ecInEditMode(e) {
+  const path = e.composedPath ? e.composedPath() : [];
+  return path.some(n => n.tagName === "HUI-CARD-EDIT-MODE");
+}
 function stopSwipeNavHijack(el) {
-  // In modalità modifica dashboard (URL con "edit=1") non blocchiamo nulla:
-  // altrimenti l'editor di HA non riceve più il gesto e la card non si può
-  // più trascinare per riordinarla o ridimensionarla.
-  const inEditMode = () => location.search.indexOf("edit=1") !== -1;
   ["touchstart", "touchmove", "touchend", "pointerdown", "pointermove"].forEach(evt =>
-    el.addEventListener(evt, e => { if (!inEditMode()) e.stopPropagation(); }, { passive: true }));
+    el.addEventListener(evt, e => { if (!ecInEditMode(e)) e.stopPropagation(); }, { passive: true }));
 }
 
 class EnergiaConsumiCard extends HTMLElement {
