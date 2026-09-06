@@ -11,7 +11,7 @@
  *    soglia_alta: 66              # % barra rossa
  *    lampeggio_record: true       # 👑 lampeggio giorno record
  */
-const CARD_VERSION = "1.0.4";
+const CARD_VERSION = "1.0.5";
 console.info(`%c ENERGIA-CONSUMI-CARD %c v${CARD_VERSION} `,
   "color:#241200;background:#ff8a3d;font-weight:700;border-radius:4px 0 0 4px",
   "color:#ffb020;background:#1a1b21;border-radius:0 4px 4px 0");
@@ -24,8 +24,12 @@ const WD = ["Lun", "Mar", "Mer", "Gio", "Ven", "Sab", "Dom"];
 // e i tap sui pulsanti continuano a funzionare normalmente, solo il "bubbling" verso
 // i listener globali della libreria viene interrotto.
 function stopSwipeNavHijack(el) {
+  // In modalità modifica dashboard (URL con "edit=1") non blocchiamo nulla:
+  // altrimenti l'editor di HA non riceve più il gesto e la card non si può
+  // più trascinare per riordinarla o ridimensionarla.
+  const inEditMode = () => location.search.indexOf("edit=1") !== -1;
   ["touchstart", "touchmove", "touchend", "pointerdown", "pointermove"].forEach(evt =>
-    el.addEventListener(evt, e => e.stopPropagation(), { passive: true }));
+    el.addEventListener(evt, e => { if (!inEditMode()) e.stopPropagation(); }, { passive: true }));
 }
 
 class EnergiaConsumiCard extends HTMLElement {
@@ -378,7 +382,17 @@ class EnergiaConsumiCard extends HTMLElement {
 // Editor visuale della card (impostazioni) — compare in modifica dashboard
 // ===========================================================================
 class EnergiaConsumiCardEditor extends HTMLElement {
-  setConfig(config) { this._config = Object.assign({}, config); this._render(); }
+  // HA richiama setConfig() sull'editor anche quando il cambiamento arriva
+  // dall'editor stesso. Ridisegnare da capo mentre l'utente scrive nel
+  // titolo gli fa perdere il fuoco a ogni carattere — su telefono si vede la
+  // tastiera aprirsi e chiudersi ad ogni lettera. _typingLock (acceso da
+  // focus/blur sui campi di testo, vedi _render) salta il ridisegno mentre
+  // è attivo.
+  setConfig(config) {
+    this._config = Object.assign({}, config);
+    if (this._typingLock) return;
+    this._render();
+  }
   set hass(h) { this._hass = h; }
 
   _emit() {
@@ -448,6 +462,10 @@ class EnergiaConsumiCardEditor extends HTMLElement {
     on("#f_shigh", "change", e => this._set("soglia_alta", parseInt(e.target.value) || 66));
     on("#f_blink", "change", e => this._set("lampeggio_record", e.target.checked));
     on("#f_add", "click", () => this._nav("/config/energy/dashboard"));
+    this.querySelectorAll('input[type="text"], input[type="number"]').forEach(inp => {
+      inp.addEventListener("focus", () => { this._typingLock = true; });
+      inp.addEventListener("blur", () => { this._typingLock = false; });
+    });
   }
 }
 customElements.define("energia-consumi-card-editor", EnergiaConsumiCardEditor);
