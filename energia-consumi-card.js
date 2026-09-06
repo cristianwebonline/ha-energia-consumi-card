@@ -11,12 +11,22 @@
  *    soglia_alta: 66              # % barra rossa
  *    lampeggio_record: true       # 👑 lampeggio giorno record
  */
-const CARD_VERSION = "1.0.3";
+const CARD_VERSION = "1.0.4";
 console.info(`%c ENERGIA-CONSUMI-CARD %c v${CARD_VERSION} `,
   "color:#241200;background:#ff8a3d;font-weight:700;border-radius:4px 0 0 4px",
   "color:#ffb020;background:#1a1b21;border-radius:0 4px 4px 0");
 
 const WD = ["Lun", "Mar", "Mer", "Gio", "Ven", "Sab", "Dom"];
+
+// Impedisce a librerie tipo "hass-swipe-navigation" di leggere un tocco/trascinamento
+// dentro questa card come uno swipe di cambio-vista/vista-precedente. Fermiamo la
+// propagazione del gesto qui (senza preventDefault): lo scroll verticale della pagina
+// e i tap sui pulsanti continuano a funzionare normalmente, solo il "bubbling" verso
+// i listener globali della libreria viene interrotto.
+function stopSwipeNavHijack(el) {
+  ["touchstart", "touchmove", "touchend", "pointerdown", "pointermove"].forEach(evt =>
+    el.addEventListener(evt, e => e.stopPropagation(), { passive: true }));
+}
 
 class EnergiaConsumiCard extends HTMLElement {
   setConfig(config) {
@@ -54,6 +64,7 @@ class EnergiaConsumiCard extends HTMLElement {
   async _boot() {
     this.innerHTML = this._shellHTML();
     this._root = this.querySelector(".eca");
+    stopSwipeNavHijack(this._root);
     try {
       await this._load();
       this._render();
