@@ -13,7 +13,7 @@
  */
 const MESI = ["Gennaio", "Febbraio", "Marzo", "Aprile", "Maggio", "Giugno",
   "Luglio", "Agosto", "Settembre", "Ottobre", "Novembre", "Dicembre"];
-const CARD_VERSION = "1.2.1";
+const CARD_VERSION = "1.2.2";
 console.info(`%c ENERGIA-CONSUMI-CARD %c v${CARD_VERSION} `,
   "color:#241200;background:#ff8a3d;font-weight:700;border-radius:4px 0 0 4px",
   "color:#ffb020;background:#1a1b21;border-radius:0 4px 4px 0");
@@ -667,8 +667,11 @@ class EnergiaConsumiCard extends HTMLElement {
     .eca-modal::-webkit-scrollbar{width:8px}
     .eca-modal::-webkit-scrollbar-thumb{background:rgba(255,255,255,.16);border-radius:8px}
     .eca-scrim.on .eca-modal{transform:none}
-    .eca-mh{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;margin-bottom:4px;
-      position:sticky;top:-20px;z-index:2;padding:20px 0 8px;margin-top:-20px;background:var(--eca-solid)}
+    /* I margini negativi laterali servono: senza, la fascia ferma in cima e
+       larga quanto il testo e il contenuto le scorre di fianco, scoperto. */
+    .eca-mh{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;
+      position:sticky;top:-20px;z-index:2;padding:20px 18px 8px;margin:-20px -18px 4px;
+      background:var(--eca-solid);border-radius:24px 24px 0 0}
     .eca-mt{font-size:17px;font-weight:850}
     .eca-ms{font-size:11.5px;color:var(--eca-muted);font-weight:600;margin-top:2px}
     .eca-x{width:30px;height:30px;border-radius:50%;border:1px solid var(--eca-stroke);background:rgba(255,255,255,.05);color:var(--eca-ink);font-size:15px;cursor:pointer}
