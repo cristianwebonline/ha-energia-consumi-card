@@ -11,7 +11,9 @@
  *    soglia_alta: 66              # % barra rossa
  *    lampeggio_record: true       # 👑 lampeggio giorno record
  */
-const CARD_VERSION = "1.0.6";
+const MESI = ["Gennaio", "Febbraio", "Marzo", "Aprile", "Maggio", "Giugno",
+  "Luglio", "Agosto", "Settembre", "Ottobre", "Novembre", "Dicembre"];
+const CARD_VERSION = "1.1.0";
 console.info(`%c ENERGIA-CONSUMI-CARD %c v${CARD_VERSION} `,
   "color:#241200;background:#ff8a3d;font-weight:700;border-radius:4px 0 0 4px",
   "color:#ffb020;background:#1a1b21;border-radius:0 4px 4px 0");
@@ -78,6 +80,9 @@ class EnergiaConsumiCard extends HTMLElement {
     try {
       await this._load();
       this._render();
+      // La card e gia in pagina: i dispositivi arrivano fra un attimo.
+      this._caricaGiorno(this._curDay);
+      this._caricaMesi();
     } catch (e) {
       this._root.innerHTML =
         `<div class="err">⚡ Dati non disponibili<br><small>${(e && e.message) || e}</small></div>`;
@@ -86,37 +91,54 @@ class EnergiaConsumiCard extends HTMLElement {
   }
 
   // ---- dati da HA -----------------------------------------------------------
-  async _load() {
+  // Il carico si divide in due tempi. Prima la RETE: sono 8 giorni per ora,
+  // meno di duecento righe, e bastano a disegnare tutto cio che si vede
+  // aprendo la card. Poi i DISPOSITIVI, in secondo piano e solo del giorno
+  // che stai guardando.
+  //
+  // Prima si chiedevano insieme 8 giorni di dati orari per TUTTI i
+  // dispositivi: in questa casa sono 43, cioe circa ottomila righe in un
+  // colpo solo, e sul Raspberry con il registro su disco esterno la card
+  // restava vuota per parecchi secondi. Adesso ne chiede un ottavo, e solo
+  // dopo aver gia disegnato il resto.
+  async _prefsEnergia() {
+    if (this._prefs) return this._prefs;
     const hass = this._hass;
     let gridStat = "sensor.generale_channel_1_energy";
-    let devs = [], names = {};
+    const devs = [], names = {};
     try {
       const prefs = await hass.callWS({ type: "energy/get_prefs" });
-      for (const s of (prefs.energy_sources || [])) {
-        if (s.type === "grid" && s.stat_energy_from) { gridStat = s.stat_energy_from; break; }
+      for (const src of (prefs.energy_sources || [])) {
+        if (src.type === "grid" && src.stat_energy_from) { gridStat = src.stat_energy_from; break; }
       }
       for (const d of (prefs.device_consumption || [])) {
         if (d.stat_consumption) { devs.push(d.stat_consumption); names[d.stat_consumption] = d.name || d.stat_consumption; }
       }
     } catch (e) { /* prefs opzionali */ }
-    // nomi leggibili dagli stati (fallback)
     for (const id of devs) {
       const st = hass.states[id];
       if ((!names[id] || names[id] === id) && st && st.attributes && st.attributes.friendly_name)
         names[id] = st.attributes.friendly_name;
     }
+    this._prefs = { gridStat, devs, names };
+    return this._prefs;
+  }
 
+  _q(ids, dal, al) {
+    return this._hass.callWS({
+      type: "recorder/statistics_during_period",
+      start_time: dal.toISOString(), end_time: al.toISOString(),
+      statistic_ids: ids, period: "hour", types: ["change"],
+    });
+  }
+
+  async _load() {
+    const { gridStat } = await this._prefsEnergia();
     const daysBack = parseInt(this._cfg.days_back) || 8;
     const now = new Date();
     const start = new Date(now.getTime() - daysBack * 86400000);
-    const q = (ids) => hass.callWS({
-      type: "recorder/statistics_during_period",
-      start_time: start.toISOString(), end_time: now.toISOString(),
-      statistic_ids: ids, period: "hour", types: ["change"],
-    });
 
-    // grid orario
-    const gres = await q([gridStat]);
+    const gres = await this._q([gridStat], start, now);
     const grows = (gres && gres[gridStat]) || [];
     const perDayHour = {};
     for (const r of grows) {
@@ -127,32 +149,6 @@ class EnergiaConsumiCard extends HTMLElement {
     }
     const perDay = {};
     for (const k in perDayHour) perDay[k] = Math.round(perDayHour[k].reduce((a, b) => a + b, 0) * 100) / 100;
-
-    // device orario
-    const perDayRankRaw = {}, perDayHourRaw = {};
-    if (devs.length) {
-      const dres = await q(devs);
-      for (const dev of devs) {
-        for (const r of ((dres && dres[dev]) || [])) {
-          let ch = r.change; if (ch == null || ch <= 0) continue;
-          const t = new Date(r.start), day = this._dkey(t), h = t.getHours();
-          (perDayRankRaw[day] = perDayRankRaw[day] || {});
-          perDayRankRaw[day][dev] = (perDayRankRaw[day][dev] || 0) + ch;
-          (perDayHourRaw[day] = perDayHourRaw[day] || {});
-          (perDayHourRaw[day][h] = perDayHourRaw[day][h] || {});
-          perDayHourRaw[day][h][dev] = (perDayHourRaw[day][h][dev] || 0) + ch;
-        }
-      }
-    }
-    const topn = (dic, n) => Object.entries(dic)
-      .map(([k, v]) => ({ name: names[k] || k, kwh: Math.round(v * 1000) / 1000 }))
-      .filter(x => x.kwh > 0.001).sort((a, b) => b.kwh - a.kwh).slice(0, n);
-    const perDayRank = {}, perDayHourTop = {};
-    for (const day in perDayRankRaw) perDayRank[day] = topn(perDayRankRaw[day], 10);
-    for (const day in perDayHourRaw) {
-      perDayHourTop[day] = {};
-      for (const h in perDayHourRaw[day]) perDayHourTop[day][h] = topn(perDayHourRaw[day][h], 5);
-    }
 
     const daysSorted = Object.keys(perDay).sort();
     const meta = daysSorted.map(k => {
@@ -167,9 +163,140 @@ class EnergiaConsumiCard extends HTMLElement {
     else if (have.has(today)) def = today;
     else def = meta.length ? meta[meta.length - 1].date : null;
 
-    this._data = { meta, perDayHour, perDayRank, perDayHourTop };
+    // I dispositivi arrivano dopo: qui restano vuoti, e la card lo dice.
+    this._data = { meta, perDayHour, perDayRank: {}, perDayHourTop: {} };
     this._curDay = def;
     this._maxTot = Math.max(...meta.map(d => d.total), 0.001);
+  }
+
+  // ---- confronto fra mesi ---------------------------------------------------
+  // Dodici righe in tutto (period: month), quindi si puo chiedere senza
+  // pensarci. Arriva dopo il resto perche il mese non e la prima cosa che si
+  // guarda aprendo la card.
+  async _caricaMesi() {
+    if (this._mesi) return;
+    try {
+      const { gridStat } = await this._prefsEnergia();
+      const oggi = new Date();
+      const dal = new Date(oggi.getFullYear() - 1, oggi.getMonth(), 1);
+      const res = await this._hass.callWS({
+        type: "recorder/statistics_during_period",
+        start_time: dal.toISOString(), end_time: oggi.toISOString(),
+        statistic_ids: [gridStat], period: "month", types: ["change"],
+      });
+      const righe = (res && res[gridStat]) || [];
+      this._mesi = righe.map(r => {
+        const t = new Date(r.start);
+        return {
+          anno: t.getFullYear(), mese: t.getMonth(), nome: MESI[t.getMonth()],
+          kwh: Math.max(0, Math.round((r.change || 0) * 100) / 100),
+          giorni: new Date(t.getFullYear(), t.getMonth() + 1, 0).getDate(),
+        };
+      }).filter(m => m.kwh > 0);
+    } catch (e) {
+      this._mesi = [];
+      console.warn("[energia-consumi-card] mesi non disponibili:", e);
+    }
+    if (this._data) this._render();
+  }
+
+  // Il mese in corso non e finito: confrontarlo tale e quale con uno finito
+  // direbbe sempre "stai consumando meno", che e una bugia. Si guarda il ritmo
+  // dei giorni gia passati e si dice dove si andra a finire.
+  _mesiHTML() {
+    if (!this._mesi) return '<div class="eca-empty">Sto leggendo i mesi...</div>';
+    if (!this._mesi.length) return '<div class="eca-empty">Nessuno storico mensile</div>';
+
+    const oggi = new Date();
+    const ultimi = this._mesi.slice(-12);
+    const corrente = ultimi[ultimi.length - 1];
+    const inCorso = corrente && corrente.anno === oggi.getFullYear() && corrente.mese === oggi.getMonth();
+    const giorniFatti = inCorso ? oggi.getDate() : 0;
+    const stima = (inCorso && giorniFatti > 0) ? corrente.kwh / giorniFatti * corrente.giorni : null;
+
+    const mx = Math.max(...ultimi.map(m => m.kwh), stima || 0, 0.001);
+    const barre = ultimi.map(m => {
+      const suo = (m === corrente && inCorso);
+      const alt = Math.max(3, Math.round(m.kwh / mx * 100));
+      const altStima = (suo && stima) ? Math.max(3, Math.round(stima / mx * 100)) : 0;
+      return '<div class="eca-mcol' + (suo ? " corso" : "") + '" title="' + this._esc(m.nome) + " " + m.anno + ": " + this._fmt(m.kwh) + ' kWh">'
+        + (altStima ? '<div class="eca-mstima" style="height:' + altStima + '%"></div>' : "")
+        + '<div class="eca-mbar" style="height:' + alt + '%;background:' + this._color(m.kwh, mx) + '"></div>'
+        + '<div class="eca-ml">' + this._esc(m.nome.slice(0, 3)) + '</div></div>';
+    }).join("");
+
+    // Il confronto piu onesto e lo stesso mese dell'anno scorso: stagione
+    // uguale, abitudini simili. Se non c'e, il mese prima.
+    let confronto = "";
+    if (corrente) {
+      const annoScorso = ultimi.find(m => m.mese === corrente.mese && m.anno === corrente.anno - 1);
+      const precedente = ultimi[ultimi.length - 2];
+      const rif = annoScorso || precedente;
+      if (rif) {
+        const mio = stima != null ? stima : corrente.kwh;
+        const pct = rif.kwh > 0 ? Math.round((mio - rif.kwh) / rif.kwh * 100) : 0;
+        const su = mio > rif.kwh;
+        confronto = '<div class="eca-mcmp ' + (su ? "su" : "giu") + '">'
+          + '<span class="eca-mfr">' + (su ? "\u25b2" : "\u25bc") + " " + Math.abs(pct) + '%</span>'
+          + '<span>' + (stima != null ? "a fine mese" : "questo mese") + " rispetto a "
+          + this._esc(rif.nome) + (annoScorso ? " " + rif.anno : "")
+          + " (" + this._fmt(rif.kwh) + " kWh &middot; " + this._fmtE(rif.kwh) + ")</span></div>";
+      }
+    }
+
+    const testa = corrente
+      ? '<div class="eca-mtesta"><div><div class="eca-mnome">' + this._esc(corrente.nome) + " " + corrente.anno + '</div>'
+        + '<div class="eca-mval">' + this._fmt(corrente.kwh) + ' <small>kWh</small>'
+        + '<span class="eca-eur">' + this._fmtE(corrente.kwh) + '</span></div></div>'
+        + (stima != null
+          ? '<div class="eca-mstim"><div class="eca-mslab">a fine mese</div>'
+            + '<div class="eca-msval">' + this._fmt(stima) + ' <small>kWh</small></div>'
+            + '<div class="eca-eur">' + this._fmtE(stima) + '</div></div>'
+          : "")
+        + '</div>'
+      : "";
+
+    return testa + confronto + '<div class="eca-mesi">' + barre + "</div>";
+  }
+
+  // I dispositivi di UN giorno solo. Si tiene quello che si e gia chiesto:
+  // tornando su un giorno gia visto non si richiede niente.
+  async _caricaGiorno(giorno) {
+    if (!giorno || !this._data) return;
+    if (this._data.perDayRank[giorno]) return;
+    if (this._inCorso === giorno) return;
+    this._inCorso = giorno;
+    this._render();
+    try {
+      const { devs, names } = await this._prefsEnergia();
+      if (!devs.length) { this._data.perDayRank[giorno] = []; this._inCorso = null; this._render(); return; }
+      const dal = new Date(giorno + "T00:00:00");
+      const al = new Date(dal.getTime() + 86400000);
+      const res = await this._q(devs, dal, al);
+      const perDev = {}, perOra = {};
+      for (const dev of devs) {
+        for (const r of ((res && res[dev]) || [])) {
+          let ch = r.change; if (ch == null || ch <= 0) continue;
+          const t = new Date(r.start);
+          if (this._dkey(t) !== giorno) continue;
+          const h = t.getHours();
+          perDev[dev] = (perDev[dev] || 0) + ch;
+          (perOra[h] = perOra[h] || {});
+          perOra[h][dev] = (perOra[h][dev] || 0) + ch;
+        }
+      }
+      const topn = (dic, n) => Object.entries(dic)
+        .map(([k, v]) => ({ name: names[k] || k, kwh: Math.round(v * 1000) / 1000 }))
+        .filter(x => x.kwh > 0.001).sort((a, b) => b.kwh - a.kwh).slice(0, n);
+      this._data.perDayRank[giorno] = topn(perDev, 10);
+      this._data.perDayHourTop[giorno] = {};
+      for (const h in perOra) this._data.perDayHourTop[giorno][h] = topn(perOra[h], 5);
+    } catch (e) {
+      this._data.perDayRank[giorno] = [];
+      console.warn("[energia-consumi-card] dispositivi non disponibili:", e);
+    }
+    this._inCorso = null;
+    this._render();
   }
 
   _dkey(d) { return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; }
@@ -239,18 +366,24 @@ class EnergiaConsumiCard extends HTMLElement {
       <div class="eca-panel"><h2>🕐 Consumo per ora</h2>
         <p class="eca-hint">Tocca un'ora per vedere quale elettrodomestico ha consumato di più</p>
         <div class="eca-chart">${chartHTML}</div></div>
+      <div class="eca-panel"><h2>📅 Confronto fra mesi</h2>
+        <p class="eca-hint">Il mese in corso e stimato sul ritmo dei giorni gia passati</p>
+        ${this._mesiHTML()}</div>
       <div class="eca-panel"><h2>🏆 Classifica elettrodomestici</h2>
-        <p class="eca-hint">Del giorno selezionato</p><div class="eca-rank">${this._rankHTML(d.perDayRank[cur])}</div></div>`;
+        <p class="eca-hint">Del giorno selezionato</p><div class="eca-rank">${
+          d.perDayRank[cur] ? this._rankHTML(d.perDayRank[cur])
+            : `<div class="eca-empty">Sto leggendo i dispositivi...</div>`
+        }</div></div>`;
 
     // eventi
     this._root.querySelectorAll(".eca-day").forEach(el =>
-      el.onclick = () => { this._curDay = el.dataset.day; this._render(); });
+      el.onclick = () => { this._curDay = el.dataset.day; this._render(); this._caricaGiorno(this._curDay); });
     this._root.querySelectorAll(".eca-hcol").forEach(el =>
       el.onclick = () => this._openHour(parseInt(el.dataset.h)));
     const chip = this._root.querySelector(".eca-chip");
     const back = d.meta.length ? d.meta[d.meta.length - 1].date : rec.date;
     if (rec.date === cur) chip.classList.add("iscur");
-    chip.onclick = () => { this._curDay = (this._curDay === rec.date) ? back : rec.date; this._render(); this._scrollSel(); };
+    chip.onclick = () => { this._curDay = (this._curDay === rec.date) ? back : rec.date; this._render(); this._scrollSel(); this._caricaGiorno(this._curDay); };
     // Evita che lo scroll orizzontale dei giorni venga letto da hass-swipe-navigation
     // (o simili) come uno swipe di cambio-vista: fermiamo la propagazione del gesto
     // touch/pointer qui, la card scrolla comunque da sola.
@@ -361,6 +494,28 @@ class EnergiaConsumiCard extends HTMLElement {
     .eca-kv{font-size:13px;font-weight:800;font-variant-numeric:tabular-nums;white-space:nowrap;text-align:right}
     .eca-kv small{color:var(--eca-faint);font-weight:600;font-size:10px;margin-left:2px}
     .eca-eur{display:block;font-size:11px;font-weight:700;color:var(--eca-acc2);margin-top:2px}
+    .eca-mtesta{display:flex;align-items:flex-end;gap:14px;flex-wrap:wrap;margin-bottom:10px}
+    .eca-mnome{font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.08em;opacity:.6}
+    .eca-mval{font-size:26px;font-weight:900;line-height:1.1;font-variant-numeric:tabular-nums}
+    .eca-mval small{font-size:14px;font-weight:800;opacity:.6;margin-left:2px}
+    .eca-mstim{margin-left:auto;text-align:right}
+    .eca-mslab{font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.07em;opacity:.5}
+    .eca-msval{font-size:19px;font-weight:900;font-variant-numeric:tabular-nums;opacity:.85}
+    .eca-mcmp{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:8px 11px;border-radius:11px;
+      font-size:12px;font-weight:600;line-height:1.4;margin-bottom:12px}
+    .eca-mcmp.su{background:rgba(255,92,92,.13);color:#ffb0a3}
+    .eca-mcmp.giu{background:rgba(56,224,138,.13);color:#8ff0b4}
+    .eca-mfr{font-size:14px;font-weight:900;flex:0 0 auto}
+    .eca-mesi{display:flex;align-items:flex-end;gap:5px;height:110px}
+    .eca-mcol{flex:1;min-width:0;height:100%;display:flex;flex-direction:column;
+      justify-content:flex-end;align-items:center;position:relative}
+    .eca-mbar{width:100%;border-radius:5px 5px 0 0;min-height:3px}
+    /* La stima e un contorno tratteggiato dietro la barra vera: si vede dove
+       si andra a finire senza far credere che sia gia successo. */
+    .eca-mstima{position:absolute;bottom:16px;left:0;right:0;
+      border:1.5px dashed rgba(255,255,255,.4);border-bottom:none;border-radius:5px 5px 0 0}
+    .eca-ml{font-size:9px;font-weight:800;opacity:.55;margin-top:4px;text-transform:uppercase}
+    .eca-mcol.corso .eca-ml{opacity:1;color:var(--eca-acc,#ffb020)}
     .eca-empty{color:var(--eca-muted);font-size:13px;text-align:center;padding:18px 0}
     .eca-add{display:flex;align-items:center;justify-content:center;gap:8px;padding:13px;border-radius:16px;cursor:pointer;
       font-size:14px;font-weight:800;color:#ffd7b0;background:linear-gradient(135deg,rgba(255,138,61,.16),rgba(255,176,32,.10));
