@@ -13,7 +13,7 @@
  */
 const MESI = ["Gennaio", "Febbraio", "Marzo", "Aprile", "Maggio", "Giugno",
   "Luglio", "Agosto", "Settembre", "Ottobre", "Novembre", "Dicembre"];
-const CARD_VERSION = "1.2.0";
+const CARD_VERSION = "1.2.1";
 console.info(`%c ENERGIA-CONSUMI-CARD %c v${CARD_VERSION} `,
   "color:#241200;background:#ff8a3d;font-weight:700;border-radius:4px 0 0 4px",
   "color:#ffb020;background:#1a1b21;border-radius:0 4px 4px 0");
@@ -656,10 +656,19 @@ class EnergiaConsumiCard extends HTMLElement {
     .eca-scrim{position:fixed;inset:0;background:rgba(4,5,8,.62);backdrop-filter:blur(6px);display:flex;
       align-items:center;justify-content:center;padding:22px;z-index:9;opacity:0;pointer-events:none;transition:opacity .18s}
     .eca-scrim.on{opacity:1;pointer-events:auto}
-    .eca-modal{width:100%;max-width:360px;background:var(--eca-solid);border:1px solid rgba(255,255,255,.16);
+    /* Il tetto in altezza serve davvero: l'archivio di un mese e alto quasi
+       1000px, e senza tetto un foglio centrato piu alto dello schermo esce
+       SOPRA il bordo (misurato: y=-194 in una finestra da 551) e quella parte
+       non si raggiunge in nessun modo, perche il traboccamento verso l'alto
+       non si puo scorrere. Con il tetto il foglio scorre dentro se stesso. */
+    .eca-modal{width:100%;max-width:420px;max-height:100%;overflow-y:auto;overscroll-behavior:contain;
+      -webkit-overflow-scrolling:touch;background:var(--eca-solid);border:1px solid rgba(255,255,255,.16);
       border-radius:24px;padding:20px 18px;box-shadow:0 24px 60px rgba(0,0,0,.6);transform:translateY(14px) scale(.97);transition:transform .2s}
+    .eca-modal::-webkit-scrollbar{width:8px}
+    .eca-modal::-webkit-scrollbar-thumb{background:rgba(255,255,255,.16);border-radius:8px}
     .eca-scrim.on .eca-modal{transform:none}
-    .eca-mh{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;margin-bottom:4px}
+    .eca-mh{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;margin-bottom:4px;
+      position:sticky;top:-20px;z-index:2;padding:20px 0 8px;margin-top:-20px;background:var(--eca-solid)}
     .eca-mt{font-size:17px;font-weight:850}
     .eca-ms{font-size:11.5px;color:var(--eca-muted);font-weight:600;margin-top:2px}
     .eca-x{width:30px;height:30px;border-radius:50%;border:1px solid var(--eca-stroke);background:rgba(255,255,255,.05);color:var(--eca-ink);font-size:15px;cursor:pointer}
