@@ -13,7 +13,7 @@
  */
 const MESI = ["Gennaio", "Febbraio", "Marzo", "Aprile", "Maggio", "Giugno",
   "Luglio", "Agosto", "Settembre", "Ottobre", "Novembre", "Dicembre"];
-const CARD_VERSION = "1.2.2";
+const CARD_VERSION = "1.3.0";
 console.info(`%c ENERGIA-CONSUMI-CARD %c v${CARD_VERSION} `,
   "color:#241200;background:#ff8a3d;font-weight:700;border-radius:4px 0 0 4px",
   "color:#ffb020;background:#1a1b21;border-radius:0 4px 4px 0");
@@ -78,11 +78,16 @@ class EnergiaConsumiCard extends HTMLElement {
     this._root = this.querySelector(".eca");
     stopSwipeNavHijack(this._root);
     try {
+      // L'archivio dei mesi parte SUBITO, in parallelo: sono poche decine di
+      // righe (una per mese) e arriva quasi sempre per primo, cosi la card ha
+      // gia qualcosa da mostrare mentre i giorni sono ancora per strada.
+      // Prima partiva per ultimo, in fila dietro a tutto il resto.
+      const mesi = this._caricaMesi();
       await this._load();
       this._render();
       // La card e gia in pagina: i dispositivi arrivano fra un attimo.
       this._caricaGiorno(this._curDay);
-      this._caricaMesi();
+      await mesi;
     } catch (e) {
       this._root.innerHTML =
         `<div class="err">⚡ Dati non disponibili<br><small>${(e && e.message) || e}</small></div>`;
@@ -178,7 +183,12 @@ class EnergiaConsumiCard extends HTMLElement {
     try {
       const { gridStat } = await this._prefsEnergia();
       const oggi = new Date();
-      const dal = new Date(oggi.getFullYear() - 1, oggi.getMonth(), 1);
+      // TUTTO lo storico, non gli ultimi dodici mesi. Le statistiche mensili
+      // di Home Assistant non scadono mai e sono una riga per mese: chiedere
+      // dieci anni costa quanto chiederne uno. Fermandosi a dodici mesi non si
+      // poteva sapere quanto era costato il 2025, e il confronto con lo stesso
+      // mese dell'anno prima cadeva proprio sui mesi piu vecchi.
+      const dal = new Date(oggi.getFullYear() - 10, 0, 1);
       const res = await this._hass.callWS({
         type: "recorder/statistics_during_period",
         start_time: dal.toISOString(), end_time: oggi.toISOString(),
@@ -197,67 +207,105 @@ class EnergiaConsumiCard extends HTMLElement {
       this._mesi = [];
       console.warn("[energia-consumi-card] mesi non disponibili:", e);
     }
+    this._anni = this._riepilogoAnni();
+    // Si apre sull'anno in corso: e quello che si guarda per primo.
+    if (this._annoAperto == null) {
+      this._annoAperto = this._anni.length ? this._anni[this._anni.length - 1].anno : new Date().getFullYear();
+    }
     if (this._data) this._render();
   }
 
   // Il mese in corso non e finito: confrontarlo tale e quale con uno finito
   // direbbe sempre "stai consumando meno", che e una bugia. Si guarda il ritmo
   // dei giorni gia passati e si dice dove si andra a finire.
-  _mesiHTML() {
-    if (!this._mesi) return '<div class="eca-empty">Sto leggendo i mesi...</div>';
+  // Un anno per riga: totale, spesa, e quanti mesi ci sono davvero dentro.
+  // I mesi incompleti si dicono, perche un anno con nove mesi di dati non si
+  // confronta con uno intero senza avvisare.
+  _riepilogoAnni() {
+    const per = {};
+    for (const m of (this._mesi || [])) {
+      const a = (per[m.anno] = per[m.anno] || { anno: m.anno, kwh: 0, mesi: 0, mesiDentro: [] });
+      a.kwh += m.kwh;
+      a.mesi += 1;
+      a.mesiDentro.push(m.mese);
+    }
+    const oggi = new Date();
+    return Object.values(per).sort((x, y) => x.anno - y.anno).map(a => {
+      a.kwh = Math.round(a.kwh * 100) / 100;
+      a.inCorso = a.anno === oggi.getFullYear();
+      a.completo = a.mesi >= 12;
+      return a;
+    });
+  }
+
+  // L'archivio: gli anni in alto, i mesi dell'anno scelto sotto. Prima c'era
+  // una striscia di dodici barre senza anni, e non si poteva andare indietro.
+  _archivioHTML() {
+    if (!this._mesi) return '<div class="eca-empty">Sto leggendo l\'archivio...</div>';
     if (!this._mesi.length) return '<div class="eca-empty">Nessuno storico mensile</div>';
 
-    const oggi = new Date();
-    const ultimi = this._mesi.slice(-12);
-    const corrente = ultimi[ultimi.length - 1];
-    const inCorso = corrente && corrente.anno === oggi.getFullYear() && corrente.mese === oggi.getMonth();
-    const giorniFatti = inCorso ? oggi.getDate() : 0;
-    const stima = (inCorso && giorniFatti > 0) ? corrente.kwh / giorniFatti * corrente.giorni : null;
+    const anni = this._anni || [];
+    const anno = this._annoAperto;
+    const suo = anni.find(a => a.anno === anno);
+    const prima = anni.find(a => a.anno === anno - 1);
 
-    const mx = Math.max(...ultimi.map(m => m.kwh), stima || 0, 0.001);
-    const barre = ultimi.map(m => {
-      const suo = (m === corrente && inCorso);
-      const alt = Math.max(3, Math.round(m.kwh / mx * 100));
-      const altStima = (suo && stima) ? Math.max(3, Math.round(stima / mx * 100)) : 0;
-      return '<div class="eca-mcol' + (suo ? " corso" : "") + '" data-mese="' + m.anno + "-" + m.mese
-        + '" title="' + this._esc(m.nome) + " " + m.anno + ": " + this._fmt(m.kwh) + ' kWh">'
-        + (altStima ? '<div class="eca-mstima" style="height:' + altStima + '%"></div>' : "")
-        + '<div class="eca-mbar" style="height:' + alt + '%;background:' + this._color(m.kwh, mx) + '"></div>'
-        + '<div class="eca-ml">' + this._esc(m.nome.slice(0, 3)) + '</div></div>';
-    }).join("");
+    const pillole = anni.map(a =>
+      '<button type="button" class="eca-anno' + (a.anno === anno ? " sel" : "") + '" data-anno="' + a.anno + '">'
+      + '<span class="eca-annon">' + a.anno + '</span>'
+      + '<span class="eca-annok">' + this._fmt(a.kwh) + ' kWh</span></button>').join("");
 
-    // Il confronto piu onesto e lo stesso mese dell'anno scorso: stagione
-    // uguale, abitudini simili. Se non c'e, il mese prima.
-    let confronto = "";
-    if (corrente) {
-      const annoScorso = ultimi.find(m => m.mese === corrente.mese && m.anno === corrente.anno - 1);
-      const precedente = ultimi[ultimi.length - 2];
-      const rif = annoScorso || precedente;
-      if (rif) {
-        const mio = stima != null ? stima : corrente.kwh;
-        const pct = rif.kwh > 0 ? Math.round((mio - rif.kwh) / rif.kwh * 100) : 0;
-        const su = mio > rif.kwh;
-        confronto = '<div class="eca-mcmp ' + (su ? "su" : "giu") + '">'
+    // Il confronto fra anni ha senso solo fra pezzi uguali: si confrontano i
+    // mesi che ci sono in TUTTI E DUE gli anni. Vale nei due sensi — l'anno in
+    // corso e incompleto, ma anche il primo anno registrato lo e: senza questa
+    // regola il 2024 risultava "+115% sul 2023" solo perche del 2023 ci sono
+    // sei mesi, e non era vero niente.
+    let cfr = "";
+    if (suo && prima) {
+      const suoi = new Set(suo.mesiDentro), quelli = new Set(prima.mesiDentro);
+      const comuni = suo.mesiDentro.filter(x => quelli.has(x));
+      const dentro = new Set(comuni);
+      const somma = a => (this._mesi || [])
+        .filter(m => m.anno === a && dentro.has(m.mese))
+        .reduce((t, m) => t + m.kwh, 0);
+      const mio = comuni.length === 12 ? suo.kwh : somma(anno);
+      const rif = comuni.length === 12 ? prima.kwh : somma(anno - 1);
+      const nota = comuni.length === 12 ? "" : " (stessi " + comuni.length + (comuni.length === 1 ? " mese" : " mesi") + ")";
+      if (rif > 0) {
+        const pct = Math.round((mio - rif) / rif * 100);
+        const su = mio > rif;
+        cfr = '<div class="eca-mcmp ' + (su ? "su" : "giu") + '">'
           + '<span class="eca-mfr">' + (su ? "\u25b2" : "\u25bc") + " " + Math.abs(pct) + '%</span>'
-          + '<span>' + (stima != null ? "a fine mese" : "questo mese") + " rispetto a "
-          + this._esc(rif.nome) + (annoScorso ? " " + rif.anno : "")
-          + " (" + this._fmt(rif.kwh) + " kWh &middot; " + this._fmtE(rif.kwh) + ")</span></div>";
+          + "<span>rispetto al " + (anno - 1) + nota + " (" + this._fmt(rif) + " kWh \u00b7 " + this._fmtE(rif) + ")</span></div>";
       }
     }
 
-    const testa = corrente
-      ? '<div class="eca-mtesta"><div><div class="eca-mnome">' + this._esc(corrente.nome) + " " + corrente.anno + '</div>'
-        + '<div class="eca-mval">' + this._fmt(corrente.kwh) + ' <small>kWh</small>'
-        + '<span class="eca-eur">' + this._fmtE(corrente.kwh) + '</span></div></div>'
-        + (stima != null
-          ? '<div class="eca-mstim"><div class="eca-mslab">a fine mese</div>'
-            + '<div class="eca-msval">' + this._fmt(stima) + ' <small>kWh</small></div>'
-            + '<div class="eca-eur">' + this._fmtE(stima) + '</div></div>'
-          : "")
-        + '</div>'
+    const testa = suo
+      ? '<div class="eca-mtesta"><div><div class="eca-mnome">Tutto il ' + anno
+        + (suo.completo ? "" : " \u00b7 " + suo.mesi + (suo.mesi === 1 ? " mese" : " mesi")) + '</div>'
+        + '<div class="eca-mval">' + this._fmt(suo.kwh) + ' <small>kWh</small>'
+        + '<span class="eca-eur">' + this._fmtE(suo.kwh) + '</span></div></div></div>'
       : "";
 
-    return testa + confronto + '<div class="eca-mesi">' + barre + "</div>";
+    const oggi = new Date();
+    const dellAnno = (this._mesi || []).filter(m => m.anno === anno);
+    const mx = Math.max(...dellAnno.map(m => m.kwh), 0.001);
+    const barre = MESI.map((nome, i) => {
+      const m = dellAnno.find(x => x.mese === i);
+      if (!m) {
+        return '<div class="eca-mcol vuoto" title="' + nome + " " + anno + ': nessun dato"><div class="eca-mbar"></div>'
+          + '<div class="eca-ml">' + nome.slice(0, 3) + "</div></div>";
+      }
+      const corso = m.anno === oggi.getFullYear() && m.mese === oggi.getMonth();
+      const alt = Math.max(3, Math.round(m.kwh / mx * 100));
+      return '<div class="eca-mcol' + (corso ? " corso" : "") + '" data-mese="' + m.anno + "-" + m.mese
+        + '" title="' + this._esc(nome) + " " + m.anno + ": " + this._fmt(m.kwh) + ' kWh \u2014 tocca per aprirlo">'
+        + '<div class="eca-mbar" style="height:' + alt + '%;background:' + this._color(m.kwh, mx) + '"></div>'
+        + '<div class="eca-ml">' + nome.slice(0, 3) + "</div></div>";
+    }).join("");
+
+    return '<div class="eca-anni">' + pillole + "</div>" + testa + cfr
+      + '<div class="eca-mesi">' + barre + "</div>"
+      + '<div class="eca-hint">Tocca un mese per aprirlo</div>';
   }
 
   // I dispositivi di UN giorno solo. Si tiene quello che si e gia chiesto:
@@ -367,9 +415,9 @@ class EnergiaConsumiCard extends HTMLElement {
       <div class="eca-panel"><h2>🕐 Consumo per ora</h2>
         <p class="eca-hint">Tocca un'ora per vedere quale elettrodomestico ha consumato di più</p>
         <div class="eca-chart">${chartHTML}</div></div>
-      <div class="eca-panel"><h2>📅 Confronto fra mesi</h2>
-        <p class="eca-hint">Il mese in corso e stimato sul ritmo dei giorni gia passati</p>
-        ${this._mesiHTML()}</div>
+      <div class="eca-panel"><h2>📅 Archivio</h2>
+        <p class="eca-hint">Anno per anno e mese per mese, da quando Home Assistant registra</p>
+        ${this._archivioHTML()}</div>
       <div class="eca-panel"><h2>🏆 Classifica elettrodomestici</h2>
         <p class="eca-hint">Del giorno selezionato</p><div class="eca-rank">${
           d.perDayRank[cur] ? this._rankHTML(d.perDayRank[cur])
@@ -381,6 +429,8 @@ class EnergiaConsumiCard extends HTMLElement {
       el.onclick = () => { this._curDay = el.dataset.day; this._render(); this._caricaGiorno(this._curDay); });
     this._root.querySelectorAll(".eca-hcol").forEach(el =>
       el.onclick = () => this._openHour(parseInt(el.dataset.h)));
+    this._root.querySelectorAll("[data-anno]").forEach(el =>
+      el.onclick = () => { this._annoAperto = parseInt(el.dataset.anno); this._render(); });
     this._root.querySelectorAll("[data-mese]").forEach(el =>
       el.onclick = () => {
         const [a, m] = el.dataset.mese.split("-").map(Number);
@@ -629,6 +679,26 @@ class EnergiaConsumiCard extends HTMLElement {
     .eca-mcmp.su{background:rgba(255,92,92,.13);color:#ffb0a3}
     .eca-mcmp.giu{background:rgba(56,224,138,.13);color:#8ff0b4}
     .eca-mfr{font-size:14px;font-weight:900;flex:0 0 auto}
+    /* Gli anni: una fila di pillole che scorre, cosi ne stanno quanti se ne
+       vuole anche sul telefono senza schiacciare i mesi sotto. */
+    .eca-anni{display:flex;gap:7px;overflow-x:auto;padding:0 0 10px;
+      scrollbar-width:none;-webkit-overflow-scrolling:touch}
+    .eca-anni::-webkit-scrollbar{display:none}
+    .eca-anno{flex:0 0 auto;display:flex;flex-direction:column;align-items:flex-start;gap:1px;
+      padding:8px 13px;border-radius:14px;cursor:pointer;font:inherit;text-align:left;
+      border:1px solid var(--eca-stroke,rgba(255,255,255,.12));background:rgba(255,255,255,.04);
+      color:var(--eca-ink);transition:background .15s,border-color .15s}
+    .eca-anno:hover{background:rgba(255,255,255,.09)}
+    .eca-annon{font-size:14px;font-weight:850;font-variant-numeric:tabular-nums}
+    .eca-annok{font-size:10.5px;font-weight:700;color:var(--eca-muted);font-variant-numeric:tabular-nums}
+    .eca-anno.sel{background:linear-gradient(135deg,rgba(255,138,61,.20),rgba(255,176,32,.12));
+      border-color:rgba(255,138,61,.45)}
+    .eca-anno.sel .eca-annok{color:#ffd7b0}
+    /* Un mese senza dati resta al suo posto, spento: i dodici mesi ci sono
+       sempre, senno gennaio e dicembre finiscono appiccicati e non si capisce
+       quale mese manca. */
+    .eca-mcol.vuoto{cursor:default;opacity:.30}
+    .eca-mcol.vuoto .eca-mbar{height:3px;background:var(--eca-muted)}
     .eca-mesi{display:flex;align-items:flex-end;gap:5px;height:110px}
     .eca-mcol{cursor:pointer}
     .eca-mcol:hover .eca-mbar{filter:brightness(1.25)}
