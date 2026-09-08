@@ -13,7 +13,7 @@
  */
 const MESI = ["Gennaio", "Febbraio", "Marzo", "Aprile", "Maggio", "Giugno",
   "Luglio", "Agosto", "Settembre", "Ottobre", "Novembre", "Dicembre"];
-const CARD_VERSION = "1.3.0";
+const CARD_VERSION = "1.3.1";
 console.info(`%c ENERGIA-CONSUMI-CARD %c v${CARD_VERSION} `,
   "color:#241200;background:#ff8a3d;font-weight:700;border-radius:4px 0 0 4px",
   "color:#ffb020;background:#1a1b21;border-radius:0 4px 4px 0");
@@ -273,9 +273,13 @@ class EnergiaConsumiCard extends HTMLElement {
       if (rif > 0) {
         const pct = Math.round((mio - rif) / rif * 100);
         const su = mio > rif;
-        cfr = '<div class="eca-mcmp ' + (su ? "su" : "giu") + '">'
-          + '<span class="eca-mfr">' + (su ? "\u25b2" : "\u25bc") + " " + Math.abs(pct) + '%</span>'
-          + "<span>rispetto al " + (anno - 1) + nota + " (" + this._fmt(rif) + " kWh \u00b7 " + this._fmtE(rif) + ")</span></div>";
+        // Arrotondato a zero vuol dire "uguale": una freccia rossa su "0%"
+        // fa suonare un allarme per una differenza che non c'e.
+        const pari = pct === 0;
+        cfr = '<div class="eca-mcmp ' + (pari ? "pari" : (su ? "su" : "giu")) + '">'
+          + '<span class="eca-mfr">' + (pari ? "=" : (su ? "\u25b2" : "\u25bc") + " " + Math.abs(pct) + "%") + '</span>'
+          + "<span>" + (pari ? "come il " : "rispetto al ") + (anno - 1) + nota
+          + " (" + this._fmt(rif) + " kWh \u00b7 " + this._fmtE(rif) + ")</span></div>";
       }
     }
 
@@ -289,6 +293,7 @@ class EnergiaConsumiCard extends HTMLElement {
     const oggi = new Date();
     const dellAnno = (this._mesi || []).filter(m => m.anno === anno);
     const mx = Math.max(...dellAnno.map(m => m.kwh), 0.001);
+    const media = dellAnno.length ? dellAnno.reduce((t, m) => t + m.kwh, 0) / dellAnno.length : 0;
     const barre = MESI.map((nome, i) => {
       const m = dellAnno.find(x => x.mese === i);
       if (!m) {
@@ -298,8 +303,10 @@ class EnergiaConsumiCard extends HTMLElement {
       const corso = m.anno === oggi.getFullYear() && m.mese === oggi.getMonth();
       const alt = Math.max(3, Math.round(m.kwh / mx * 100));
       return '<div class="eca-mcol' + (corso ? " corso" : "") + '" data-mese="' + m.anno + "-" + m.mese
-        + '" title="' + this._esc(nome) + " " + m.anno + ": " + this._fmt(m.kwh) + ' kWh \u2014 tocca per aprirlo">'
-        + '<div class="eca-mbar" style="height:' + alt + '%;background:' + this._color(m.kwh, mx) + '"></div>'
+        + '" title="' + this._esc(nome) + " " + m.anno + ": " + this._fmt(m.kwh) + " kWh, "
+        + (media > 0 ? (m.kwh >= media ? "sopra" : "sotto") + " la media dell'anno (" + this._fmt(media) + " kWh)" : "")
+        + ' \u2014 tocca per aprirlo">'
+        + '<div class="eca-mbar" style="height:' + alt + '%;background:' + this._coloreMese(m.kwh, media) + '"></div>'
         + '<div class="eca-ml">' + nome.slice(0, 3) + "</div></div>";
     }).join("");
 
@@ -353,6 +360,20 @@ class EnergiaConsumiCard extends HTMLElement {
   // ---- helpers presentazione ------------------------------------------------
   _fmt(x) { return (Math.round(x * 100) / 100).toLocaleString("it-IT", { minimumFractionDigits: x < 10 ? 2 : 1, maximumFractionDigits: 2 }); }
   _fmtE(k) { return "≈ " + (k * (parseFloat(this._cfg.prezzo_kwh) || 0)).toLocaleString("it-IT", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " €"; }
+  // I mesi di un anno si somigliano quasi tutti (qui vanno da 276 a 425 kWh):
+  // colorandoli rispetto al mese piu alto finivano TUTTI in cima alla scala,
+  // tutti rossi, e il colore non diceva piu niente. Rispetto alla media
+  // invece si legge a colpo d'occhio quali mesi sono stati sopra e quali
+  // sotto — che e la domanda che ci si fa guardando un anno.
+  _coloreMese(v, media) {
+    if (!media || media <= 0) return "var(--eca-stroke)";
+    const r = v / media;
+    if (r >= 1.15) return "linear-gradient(180deg,#ff7a4d,#ff5442)";
+    if (r >= 1.02) return "linear-gradient(180deg,#ffd166,#ffb020)";
+    if (r >= 0.88) return "linear-gradient(180deg,#9fe3b4,#6cc98c)";
+    return "linear-gradient(180deg,#5fe08c,#3fbf6f)";
+  }
+
   _color(v, max) {
     if (max <= 0) return "var(--eca-stroke)";
     const r = v / max, mid = (this._cfg.soglia_media || 33) / 100, hi = (this._cfg.soglia_alta || 66) / 100;
@@ -681,6 +702,8 @@ class EnergiaConsumiCard extends HTMLElement {
     .eca-mfr{font-size:14px;font-weight:900;flex:0 0 auto}
     /* Gli anni: una fila di pillole che scorre, cosi ne stanno quanti se ne
        vuole anche sul telefono senza schiacciare i mesi sotto. */
+    .eca-mcmp.pari{background:rgba(255,255,255,.05);border-color:var(--eca-stroke,rgba(255,255,255,.12));
+      color:var(--eca-muted)}
     .eca-anni{display:flex;gap:7px;overflow-x:auto;padding:0 0 10px;
       scrollbar-width:none;-webkit-overflow-scrolling:touch}
     .eca-anni::-webkit-scrollbar{display:none}
