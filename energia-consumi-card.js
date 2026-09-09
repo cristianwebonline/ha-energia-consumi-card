@@ -13,7 +13,7 @@
  */
 const MESI = ["Gennaio", "Febbraio", "Marzo", "Aprile", "Maggio", "Giugno",
   "Luglio", "Agosto", "Settembre", "Ottobre", "Novembre", "Dicembre"];
-const CARD_VERSION = "1.4.0";
+const CARD_VERSION = "1.5.0";
 console.info(`%c ENERGIA-CONSUMI-CARD %c v${CARD_VERSION} `,
   "color:#241200;background:#ff8a3d;font-weight:700;border-radius:4px 0 0 4px",
   "color:var(--eca-c-acc,#ffb020);background:#1a1b21;border-radius:0 4px 4px 0");
@@ -633,11 +633,13 @@ class EnergiaConsumiCard extends HTMLElement {
     .eca-sub{margin-top:3px;font-size:12px;color:var(--eca-muted);font-weight:500}
     .eca-big{text-align:right;line-height:1}
     .eca-n{font-size:32px;font-weight:850;letter-spacing:-1px;font-variant-numeric:tabular-nums;
-      background:linear-gradient(180deg,#fff,#ffb98a);-webkit-background-clip:text;background-clip:text;color:transparent}
+      background:linear-gradient(180deg,var(--eca-grad-a,#fff),var(--eca-grad-b,#ffb98a));
+      -webkit-background-clip:text;background-clip:text;color:transparent}
     .eca-u{font-size:13px;color:var(--eca-muted);font-weight:700;margin-left:2px}
     .eca-cost{font-size:14px;font-weight:800;color:var(--eca-acc2);margin-top:3px;font-variant-numeric:tabular-nums}
     .eca-cap{font-size:9.5px;letter-spacing:1.5px;text-transform:uppercase;color:var(--eca-faint);font-weight:800;margin-top:3px}
-    .eca-days{display:flex;gap:8px;overflow-x:auto;padding:6px 2px 8px;scrollbar-width:none;touch-action:pan-x}
+    .eca-days{display:flex;gap:8px;overflow-x:auto;padding:6px 2px 8px;scrollbar-width:none;
+      touch-action:pan-x pan-y}
     .eca-days::-webkit-scrollbar{display:none}
     .eca-day{position:relative;flex:0 0 auto;min-width:66px;padding:10px 12px;border-radius:16px;cursor:pointer;
       background:var(--eca-panel);border:1px solid var(--eca-stroke);display:flex;flex-direction:column;gap:5px;
