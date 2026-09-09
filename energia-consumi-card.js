@@ -13,10 +13,10 @@
  */
 const MESI = ["Gennaio", "Febbraio", "Marzo", "Aprile", "Maggio", "Giugno",
   "Luglio", "Agosto", "Settembre", "Ottobre", "Novembre", "Dicembre"];
-const CARD_VERSION = "1.3.1";
+const CARD_VERSION = "1.4.0";
 console.info(`%c ENERGIA-CONSUMI-CARD %c v${CARD_VERSION} `,
   "color:#241200;background:#ff8a3d;font-weight:700;border-radius:4px 0 0 4px",
-  "color:#ffb020;background:#1a1b21;border-radius:0 4px 4px 0");
+  "color:var(--eca-c-acc,#ffb020);background:#1a1b21;border-radius:0 4px 4px 0");
 
 const WD = ["Lun", "Mar", "Mer", "Gio", "Ven", "Sab", "Dom"];
 
@@ -650,9 +650,9 @@ class EnergiaConsumiCard extends HTMLElement {
     .eca-sp i{display:block;height:100%;border-radius:3px}
     .eca-day.sel{border-color:transparent;background:linear-gradient(160deg,rgba(255,138,61,.28),rgba(255,176,32,.14));
       box-shadow:0 0 0 1.5px var(--eca-acc) inset}
-    .eca-day.sel .eca-dl{color:#ffd7b0}
+    .eca-day.sel .eca-dl{color:var(--eca-c-soft,#ffd7b0)}
     .eca-day.rec{animation:ecapulse 1.9s ease-in-out infinite}
-    .eca-day.rec .eca-dk{color:#ffce8a}
+    .eca-day.rec .eca-dk{color:var(--eca-c-warm,#ffce8a)}
     .eca-crown{position:absolute;top:-7px;right:-4px;font-size:13px;filter:drop-shadow(0 1px 2px rgba(0,0,0,.6))}
     @keyframes ecapulse{0%,100%{box-shadow:0 0 0 1px rgba(255,84,66,.35),0 0 6px rgba(255,84,66,.15)}
       50%{box-shadow:0 0 0 1.6px rgba(255,84,66,.9),0 0 16px rgba(255,84,66,.55)}}
@@ -661,11 +661,11 @@ class EnergiaConsumiCard extends HTMLElement {
     .eca-chip:hover{transform:translateY(-1px);filter:brightness(1.08)}
     .eca-chip.iscur{opacity:.55}
     .eca-ic{font-size:19px}.eca-cb{flex:1;min-width:0}
-    .eca-clab{font-size:10px;letter-spacing:.8px;text-transform:uppercase;color:#ffb9a0;font-weight:800}
+    .eca-clab{font-size:10px;letter-spacing:.8px;text-transform:uppercase;color:var(--eca-c-soft2,#ffb9a0);font-weight:800}
     .eca-cday{font-size:15px;font-weight:850;margin-top:1px}
     .eca-cval{font-size:13px;font-weight:800;color:var(--eca-acc2);font-variant-numeric:tabular-nums;white-space:nowrap;text-align:right}
-    .eca-cval small{display:block;font-size:10.5px;color:#ffb9a0;font-weight:700;margin-top:1px}
-    .eca-go{font-size:16px;color:#ffb9a0}
+    .eca-cval small{display:block;font-size:10.5px;color:var(--eca-c-soft2,#ffb9a0);font-weight:700;margin-top:1px}
+    .eca-go{font-size:16px;color:var(--eca-c-soft2,#ffb9a0)}
     .eca-panel{background:var(--eca-panel);border:1px solid var(--eca-stroke);border-radius:20px;padding:16px 15px 14px}
     .eca-hint{font-size:11px;color:var(--eca-faint);margin:0 0 14px;font-weight:500}
     .eca-chart{display:flex;align-items:flex-end;gap:3px;height:150px;padding-top:14px}
@@ -697,8 +697,8 @@ class EnergiaConsumiCard extends HTMLElement {
     .eca-msval{font-size:19px;font-weight:900;font-variant-numeric:tabular-nums;opacity:.85}
     .eca-mcmp{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:8px 11px;border-radius:11px;
       font-size:12px;font-weight:600;line-height:1.4;margin-bottom:12px}
-    .eca-mcmp.su{background:rgba(255,92,92,.13);color:#ffb0a3}
-    .eca-mcmp.giu{background:rgba(56,224,138,.13);color:#8ff0b4}
+    .eca-mcmp.su{background:rgba(255,92,92,.13);color:var(--eca-c-bad,#ffb0a3)}
+    .eca-mcmp.giu{background:rgba(56,224,138,.13);color:var(--eca-c-ok,#8ff0b4)}
     .eca-mfr{font-size:14px;font-weight:900;flex:0 0 auto}
     /* Gli anni: una fila di pillole che scorre, cosi ne stanno quanti se ne
        vuole anche sul telefono senza schiacciare i mesi sotto. */
@@ -716,7 +716,7 @@ class EnergiaConsumiCard extends HTMLElement {
     .eca-annok{font-size:10.5px;font-weight:700;color:var(--eca-muted);font-variant-numeric:tabular-nums}
     .eca-anno.sel{background:linear-gradient(135deg,rgba(255,138,61,.20),rgba(255,176,32,.12));
       border-color:rgba(255,138,61,.45)}
-    .eca-anno.sel .eca-annok{color:#ffd7b0}
+    .eca-anno.sel .eca-annok{color:var(--eca-c-soft,#ffd7b0)}
     /* Un mese senza dati resta al suo posto, spento: i dodici mesi ci sono
        sempre, senno gennaio e dicembre finiscono appiccicati e non si capisce
        quale mese manca. */
@@ -742,7 +742,7 @@ class EnergiaConsumiCard extends HTMLElement {
     .eca-mcol.corso .eca-ml{opacity:1;color:var(--eca-acc,#ffb020)}
     .eca-empty{color:var(--eca-muted);font-size:13px;text-align:center;padding:18px 0}
     .eca-add{display:flex;align-items:center;justify-content:center;gap:8px;padding:13px;border-radius:16px;cursor:pointer;
-      font-size:14px;font-weight:800;color:#ffd7b0;background:linear-gradient(135deg,rgba(255,138,61,.16),rgba(255,176,32,.10));
+      font-size:14px;font-weight:800;color:var(--eca-c-soft,#ffd7b0);background:linear-gradient(135deg,rgba(255,138,61,.16),rgba(255,176,32,.10));
       border:1px solid rgba(255,138,61,.32);transition:transform .15s,filter .15s}
     .eca-add:hover{transform:translateY(-1px);filter:brightness(1.1)}
     .eca-err{color:var(--eca-muted);text-align:center;padding:40px 10px;font-size:14px}
