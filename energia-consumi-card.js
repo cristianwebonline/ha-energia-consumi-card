@@ -13,7 +13,7 @@
  */
 const MESI = ["Gennaio", "Febbraio", "Marzo", "Aprile", "Maggio", "Giugno",
   "Luglio", "Agosto", "Settembre", "Ottobre", "Novembre", "Dicembre"];
-const CARD_VERSION = "1.5.0";
+const CARD_VERSION = "1.6.0";
 console.info(`%c ENERGIA-CONSUMI-CARD %c v${CARD_VERSION} `,
   "color:#241200;background:#ff8a3d;font-weight:700;border-radius:4px 0 0 4px",
   "color:var(--eca-c-acc,#ffb020);background:#1a1b21;border-radius:0 4px 4px 0");
@@ -50,6 +50,14 @@ class EnergiaConsumiCard extends HTMLElement {
       soglia_media: 33,
       soglia_alta: 66,
       lampeggio_record: true,
+      // I blocchi si accendono uno per uno: lasciandone acceso uno solo si
+      // ottiene una card di solo archivio, o di sola classifica, da mettere
+      // dove serve. Con tutti accesi e la card completa di prima.
+      mostra_giorni: true,
+      mostra_record: true,
+      mostra_ore: true,
+      mostra_archivio: true,
+      mostra_classifica: true,
     }, config || {});
     this._loaded = false;
     this._data = null;
@@ -423,27 +431,28 @@ class EnergiaConsumiCard extends HTMLElement {
         <div class="eca-hl">${h % 3 === 0 ? String(h).padStart(2, "0") : ""}</div></div>`;
     }).join("");
 
+    const c = this._cfg;
     this._root.innerHTML = `
       <div class="eca-top">
         <div><h1>${this._esc(this._cfg.title)}</h1><div class="eca-sub">${day ? day.label : "—"}</div></div>
         <div class="eca-big"><div><span class="eca-n">${day ? this._fmt(day.total) : "0"}</span><span class="eca-u">kWh</span></div>
           <div class="eca-cost">${day ? this._fmtE(day.total) : ""}</div><div class="eca-cap">totale giorno</div></div>
       </div>
-      <div class="eca-days">${daysHTML}</div>
-      <div class="eca-chip"><div class="eca-ic">👑</div><div class="eca-cb">
+      ${c.mostra_giorni === false ? "" : `<div class="eca-days">${daysHTML}</div>`}
+      ${c.mostra_record === false ? "" : `<div class="eca-chip"><div class="eca-ic">👑</div><div class="eca-cb">
         <div class="eca-clab">Giorno record (${d.meta.length} gg)</div><div class="eca-cday">${rec.label}</div></div>
-        <div class="eca-cval">${this._fmt(rec.total)} kWh<small>${this._fmtE(rec.total)}</small></div><div class="eca-go">›</div></div>
-      <div class="eca-panel"><h2>🕐 Consumo per ora</h2>
+        <div class="eca-cval">${this._fmt(rec.total)} kWh<small>${this._fmtE(rec.total)}</small></div><div class="eca-go">›</div></div>`}
+      ${c.mostra_ore === false ? "" : `<div class="eca-panel"><h2>🕐 Consumo per ora</h2>
         <p class="eca-hint">Tocca un'ora per vedere quale elettrodomestico ha consumato di più</p>
-        <div class="eca-chart">${chartHTML}</div></div>
-      <div class="eca-panel"><h2>📅 Archivio</h2>
+        <div class="eca-chart">${chartHTML}</div></div>`}
+      ${c.mostra_archivio === false ? "" : `<div class="eca-panel"><h2>📅 Archivio</h2>
         <p class="eca-hint">Anno per anno e mese per mese, da quando Home Assistant registra</p>
-        ${this._archivioHTML()}</div>
-      <div class="eca-panel"><h2>🏆 Classifica elettrodomestici</h2>
+        ${this._archivioHTML()}</div>`}
+      ${c.mostra_classifica === false ? "" : `<div class="eca-panel"><h2>🏆 Classifica elettrodomestici</h2>
         <p class="eca-hint">Del giorno selezionato</p><div class="eca-rank">${
           d.perDayRank[cur] ? this._rankHTML(d.perDayRank[cur])
             : `<div class="eca-empty">Sto leggendo i dispositivi...</div>`
-        }</div></div>`;
+        }</div></div>`}`;
 
     // eventi
     this._root.querySelectorAll(".eca-day").forEach(el =>
@@ -459,13 +468,15 @@ class EnergiaConsumiCard extends HTMLElement {
       });
     const chip = this._root.querySelector(".eca-chip");
     const back = d.meta.length ? d.meta[d.meta.length - 1].date : rec.date;
-    if (rec.date === cur) chip.classList.add("iscur");
-    chip.onclick = () => { this._curDay = (this._curDay === rec.date) ? back : rec.date; this._render(); this._scrollSel(); this._caricaGiorno(this._curDay); };
+    if (chip) {
+      if (rec.date === cur) chip.classList.add("iscur");
+      chip.onclick = () => { this._curDay = (this._curDay === rec.date) ? back : rec.date; this._render(); this._scrollSel(); this._caricaGiorno(this._curDay); };
+    }
     // Evita che lo scroll orizzontale dei giorni venga letto da hass-swipe-navigation
     // (o simili) come uno swipe di cambio-vista: fermiamo la propagazione del gesto
     // touch/pointer qui, la card scrolla comunque da sola.
     const daysEl = this._root.querySelector(".eca-days");
-    ["touchstart", "touchmove", "touchend", "pointerdown", "pointermove"].forEach(evt =>
+    if (daysEl) ["touchstart", "touchmove", "touchend", "pointerdown", "pointermove"].forEach(evt =>
       daysEl.addEventListener(evt, e => e.stopPropagation(), { passive: true }));
     this._scrollSel();
   }
@@ -848,6 +859,14 @@ class EnergiaConsumiCardEditor extends HTMLElement {
       <div class="sw">👑 Lampeggio giorno record
         <input type="checkbox" id="f_blink" ${g("lampeggio_record",true)?"checked":""}></div>
       <div class="sep"></div>
+      <div class="fld"><label>Cosa mostra questa card</label>
+        <span class="h">Servono per dividere: lasciando acceso un pezzo solo ottieni una card di solo archivio, o di sola classifica, e la metti dove vuoi. Con tutti accesi e la card completa.</span></div>
+      <div class="sw">📆 La fila dei giorni<input type="checkbox" id="f_mgiorni" ${g("mostra_giorni",true)?"checked":""}></div>
+      <div class="sw">👑 Il giorno record<input type="checkbox" id="f_mrecord" ${g("mostra_record",true)?"checked":""}></div>
+      <div class="sw">🕐 Consumo per ora<input type="checkbox" id="f_more" ${g("mostra_ore",true)?"checked":""}></div>
+      <div class="sw">📅 Archivio anni e mesi<input type="checkbox" id="f_marchivio" ${g("mostra_archivio",true)?"checked":""}></div>
+      <div class="sw">🏆 Classifica elettrodomestici<input type="checkbox" id="f_mclass" ${g("mostra_classifica",true)?"checked":""}></div>
+      <div class="sep"></div>
       <button class="addbtn" id="f_add">➕ Aggiungi sensori di consumo</button>
       <div class="note">Apre la pagina Energia di Home Assistant dove aggiungi/togli le prese monitorate. La card si aggiorna da sola.</div>
     </div>`;
@@ -860,6 +879,11 @@ class EnergiaConsumiCardEditor extends HTMLElement {
     on("#f_smid", "change", e => this._set("soglia_media", parseInt(e.target.value) || 33));
     on("#f_shigh", "change", e => this._set("soglia_alta", parseInt(e.target.value) || 66));
     on("#f_blink", "change", e => this._set("lampeggio_record", e.target.checked));
+    on("#f_mgiorni", "change", e => this._set("mostra_giorni", e.target.checked));
+    on("#f_mrecord", "change", e => this._set("mostra_record", e.target.checked));
+    on("#f_more", "change", e => this._set("mostra_ore", e.target.checked));
+    on("#f_marchivio", "change", e => this._set("mostra_archivio", e.target.checked));
+    on("#f_mclass", "change", e => this._set("mostra_classifica", e.target.checked));
     on("#f_add", "click", () => this._nav("/config/energy/dashboard"));
     this.querySelectorAll('input[type="text"], input[type="number"]').forEach(inp => {
       inp.addEventListener("focus", () => { this._typingLock = true; });
