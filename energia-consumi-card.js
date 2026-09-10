@@ -13,7 +13,7 @@
  */
 const MESI = ["Gennaio", "Febbraio", "Marzo", "Aprile", "Maggio", "Giugno",
   "Luglio", "Agosto", "Settembre", "Ottobre", "Novembre", "Dicembre"];
-const CARD_VERSION = "1.6.0";
+const CARD_VERSION = "1.7.0";
 console.info(`%c ENERGIA-CONSUMI-CARD %c v${CARD_VERSION} `,
   "color:#241200;background:#ff8a3d;font-weight:700;border-radius:4px 0 0 4px",
   "color:var(--eca-c-acc,#ffb020);background:#1a1b21;border-radius:0 4px 4px 0");
@@ -503,8 +503,7 @@ class EnergiaConsumiCard extends HTMLElement {
   async _openMese(anno, mese) {
     const m = (this._mesi || []).find(x => x.anno === anno && x.mese === mese);
     if (!m) return;
-    let ov = this.querySelector(".eca-scrim");
-    if (!ov) { ov = document.createElement("div"); ov.className = "eca-scrim"; this._root.appendChild(ov); }
+    const ov = this._scrim();
 
     const oggi = new Date();
     const inCorso = m.anno === oggi.getFullYear() && m.mese === oggi.getMonth();
@@ -613,13 +612,49 @@ class EnergiaConsumiCard extends HTMLElement {
     disegna(giorni, classifica);
   }
 
+  // Il foglio va appeso al DOCUMENTO, non dentro la card: dentro il pannello
+  // la card porta il vetro sfocato, e un elemento con backdrop-filter diventa
+  // il riferimento dei position:fixed che contiene — il foglio restava
+  // prigioniero della card, sotto la barra di navigazione.
+  // Le tinte pero vivono su ".eca": si portano dietro, copiate una volta, se
+  // no il foglio uscirebbe senza colori.
+  _scrim() {
+    let ov = document.querySelector(".eca-scrim[data-mio='" + this._id() + "']");
+    if (!ov) {
+      ov = document.createElement("div");
+      ov.className = "eca-scrim";
+      ov.dataset.mio = this._id();
+      document.body.appendChild(ov);
+    }
+    const cs = getComputedStyle(this._root);
+    ["--eca-panel", "--eca-solid", "--eca-stroke", "--eca-ink", "--eca-muted", "--eca-faint",
+     "--eca-acc", "--eca-acc2", "--eca-grad-a", "--eca-grad-b",
+     "--eca-c-acc", "--eca-c-bad", "--eca-c-ok", "--eca-c-soft", "--eca-c-soft2", "--eca-c-warm"]
+      .forEach(v => {
+        const val = cs.getPropertyValue(v);
+        if (val) ov.style.setProperty(v, val.trim());
+      });
+    return ov;
+  }
+
+  _id() {
+    if (!this.__id) this.__id = "eca" + Math.random().toString(36).slice(2, 8);
+    return this.__id;
+  }
+
+  // Se la card sparisce dalla pagina (cambio vista, modifica) il suo foglio non
+  // deve restare appeso al documento a vita.
+  disconnectedCallback() {
+    const ov = document.querySelector(".eca-scrim[data-mio='" + this._id() + "']");
+    if (ov) ov.remove();
+  }
+
   _openHour(h) {
     const d = this._data, cur = this._curDay;
     const day = d.meta.find(x => x.date === cur);
     const v = (d.perDayHour[cur] || [])[h] || 0;
     const top = (d.perDayHourTop[cur] || {})[String(h)] || [];
-    let ov = this.querySelector(".eca-scrim");
-    if (!ov) { ov = document.createElement("div"); ov.className = "eca-scrim"; this._root.appendChild(ov); }
+    const ov = this._scrim();
     ov.innerHTML = `<div class="eca-modal">
       <div class="eca-mh"><div><div class="eca-mt">Ore ${String(h).padStart(2, "0")}:00</div>
       <div class="eca-ms">${day ? day.label : ""}</div></div><button class="eca-x">✕</button></div>
@@ -760,7 +795,7 @@ class EnergiaConsumiCard extends HTMLElement {
     .eca-add:hover{transform:translateY(-1px);filter:brightness(1.1)}
     .eca-err{color:var(--eca-muted);text-align:center;padding:40px 10px;font-size:14px}
     .eca-scrim{position:fixed;inset:0;background:rgba(4,5,8,.62);backdrop-filter:blur(6px);display:flex;
-      align-items:center;justify-content:center;padding:22px;z-index:9;opacity:0;pointer-events:none;transition:opacity .18s}
+      align-items:center;justify-content:center;padding:22px;z-index:100;opacity:0;pointer-events:none;transition:opacity .18s}
     .eca-scrim.on{opacity:1;pointer-events:auto}
     /* Il tetto in altezza serve davvero: l'archivio di un mese e alto quasi
        1000px, e senza tetto un foglio centrato piu alto dello schermo esce
