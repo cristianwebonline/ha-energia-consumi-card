@@ -13,7 +13,7 @@
  */
 const MESI = ["Gennaio", "Febbraio", "Marzo", "Aprile", "Maggio", "Giugno",
   "Luglio", "Agosto", "Settembre", "Ottobre", "Novembre", "Dicembre"];
-const CARD_VERSION = "1.7.0";
+const CARD_VERSION = "1.8.0";
 console.info(`%c ENERGIA-CONSUMI-CARD %c v${CARD_VERSION} `,
   "color:#241200;background:#ff8a3d;font-weight:700;border-radius:4px 0 0 4px",
   "color:var(--eca-c-acc,#ffb020);background:#1a1b21;border-radius:0 4px 4px 0");
@@ -47,6 +47,7 @@ class EnergiaConsumiCard extends HTMLElement {
       days_back: 8,
       open_on: "today",
       prezzo_kwh: 0.30,
+      potenza_casa: "",        // sensore W della casa, per le domande
       soglia_media: 33,
       soglia_alta: 66,
       lampeggio_record: true,
@@ -438,6 +439,8 @@ class EnergiaConsumiCard extends HTMLElement {
         <div class="eca-big"><div><span class="eca-n">${day ? this._fmt(day.total) : "0"}</span><span class="eca-u">kWh</span></div>
           <div class="eca-cost">${day ? this._fmtE(day.total) : ""}</div><div class="eca-cap">totale giorno</div></div>
       </div>
+      ${this._cfg.potenza_casa && customElements.get("mini-card")
+        ? `<button type="button" class="eca-chiedi" data-chiedi>Fai una domanda alla casa</button>` : ""}
       ${c.mostra_giorni === false ? "" : `<div class="eca-days">${daysHTML}</div>`}
       ${c.mostra_record === false ? "" : `<div class="eca-chip"><div class="eca-ic">👑</div><div class="eca-cb">
         <div class="eca-clab">Giorno record (${d.meta.length} gg)</div><div class="eca-cday">${rec.label}</div></div>
@@ -461,6 +464,8 @@ class EnergiaConsumiCard extends HTMLElement {
       el.onclick = () => this._openHour(parseInt(el.dataset.h)));
     this._root.querySelectorAll("[data-anno]").forEach(el =>
       el.onclick = () => { this._annoAperto = parseInt(el.dataset.anno); this._render(); });
+    const chiediBtn = this._root.querySelector("[data-chiedi]");
+    if (chiediBtn) chiediBtn.onclick = () => this._apriDomande();
     this._root.querySelectorAll("[data-mese]").forEach(el =>
       el.onclick = () => {
         const [a, m] = el.dataset.mese.split("-").map(Number);
@@ -618,14 +623,48 @@ class EnergiaConsumiCard extends HTMLElement {
   // prigioniero della card, sotto la barra di navigazione.
   // Le tinte pero vivono su ".eca": si portano dietro, copiate una volta, se
   // no il foglio uscirebbe senza colori.
+  // Le domande alla casa intera. Serve un sensore di potenza (W) della casa:
+  // le statistiche orarie di quello sono la materia prima delle risposte.
+  _apriDomande() {
+    const MC = customElements.get("mini-card");
+    const id = this._cfg.potenza_casa;
+    if (!MC || !id || !this._hass) return;
+    if (!this._mcOspite) {
+      const el = document.createElement("mini-card");
+      // Fuori dallo schermo ma disegnata: con display:none il suo foglio,
+      // che e figlio della card, non comparirebbe.
+      el.style.cssText = "position:fixed;left:-10000px;top:0;width:220px;z-index:2147483000";
+      (this.closest(".fh-app") || document.body).appendChild(el);
+      this._mcOspite = el;
+    }
+    const el = this._mcOspite;
+    el.setConfig({
+      type: "custom:mini-card",
+      name: this._cfg.title || "Casa",
+      power: id,
+      prezzo_kwh: this._cfg.prezzo_kwh,
+    });
+    el.hass = this._hass;
+    if (el._openImmersive) el._openImmersive();
+    const velo = el.querySelector(".mc-scrim");
+    if (velo) {
+      const chiaro = !!this.closest(".fh-app.chiaro");
+      velo.style.background = chiaro ? "rgba(226,234,241,.95)" : "rgba(6,8,12,.95)";
+      velo.style.backdropFilter = "blur(14px)";
+      velo.style.webkitBackdropFilter = "blur(14px)";
+    }
+  }
+
   _scrim() {
     let ov = document.querySelector(".eca-scrim[data-mio='" + this._id() + "']");
+    // Dove deve nascere: dentro il pannello se la card ci sta dentro.
+    const casa = this.closest(".fh-app") || document.body;
     if (!ov) {
       ov = document.createElement("div");
       ov.className = "eca-scrim";
       ov.dataset.mio = this._id();
-      document.body.appendChild(ov);
     }
+    if (ov.parentElement !== casa) casa.appendChild(ov);
     const cs = getComputedStyle(this._root);
     ["--eca-panel", "--eca-solid", "--eca-stroke", "--eca-ink", "--eca-muted", "--eca-faint",
      "--eca-acc", "--eca-acc2", "--eca-grad-a", "--eca-grad-b",
@@ -794,8 +833,14 @@ class EnergiaConsumiCard extends HTMLElement {
       border:1px solid rgba(255,138,61,.32);transition:transform .15s,filter .15s}
     .eca-add:hover{transform:translateY(-1px);filter:brightness(1.1)}
     .eca-err{color:var(--eca-muted);text-align:center;padding:40px 10px;font-size:14px}
+    /* z-index alto davvero: dentro Faber Home ci sono barre e fogli a
+       999999, e a 100 questa finestra si apriva sotto di loro. */
+    .eca-chiedi{display:block;width:100%;margin:2px 0 12px;padding:11px;border-radius:14px;cursor:pointer;
+      border:1px solid var(--eca-stroke);background:var(--eca-panel);color:var(--eca-ink);
+      font:inherit;font-size:13.5px;font-weight:800}
+    .eca-chiedi:active{transform:scale(.99)}
     .eca-scrim{position:fixed;inset:0;background:rgba(4,5,8,.62);backdrop-filter:blur(6px);display:flex;
-      align-items:center;justify-content:center;padding:22px;z-index:100;opacity:0;pointer-events:none;transition:opacity .18s}
+      align-items:center;justify-content:center;padding:22px;z-index:2147483000;opacity:0;pointer-events:none;transition:opacity .18s}
     .eca-scrim.on{opacity:1;pointer-events:auto}
     /* Il tetto in altezza serve davvero: l'archivio di un mese e alto quasi
        1000px, e senza tetto un foglio centrato piu alto dello schermo esce
@@ -882,6 +927,9 @@ class EnergiaConsumiCardEditor extends HTMLElement {
           <select id="f_open"><option value="today"${g("open_on","today")==="today"?" selected":""}>Oggi</option>
             <option value="record"${g("open_on","today")==="record"?" selected":""}>Giorno record</option></select></div>
       </div>
+      <div class="fld"><label>Sensore potenza di casa (W)</label>
+        <span class="h">Serve al tasto "Fai una domanda alla casa": e il sensore dei watt istantanei del contatore.</span>
+        <input type="text" id="f_pcasa" placeholder="sensor.…" value="${(g("potenza_casa","")+"").replace(/"/g,"&quot;")}"></div>
       <div class="fld"><label>Prezzo energia (€/kWh)</label>
         <span class="h">Costo orientativo accanto ai kWh (media mercato ~0,30)</span>
         <input type="number" id="f_price" step="0.01" min="0" max="5" value="${g("prezzo_kwh",0.30)}"></div>
@@ -910,6 +958,7 @@ class EnergiaConsumiCardEditor extends HTMLElement {
     on("#f_title", "input", e => this._set("title", e.target.value));
     on("#f_days", "change", e => this._set("days_back", parseInt(e.target.value)));
     on("#f_open", "change", e => this._set("open_on", e.target.value));
+    on("#f_pcasa", "change", e => this._set("potenza_casa", String(e.target.value || "").trim()));
     on("#f_price", "change", e => this._set("prezzo_kwh", parseFloat(String(e.target.value).replace(",", ".")) || 0.30));
     on("#f_smid", "change", e => this._set("soglia_media", parseInt(e.target.value) || 33));
     on("#f_shigh", "change", e => this._set("soglia_alta", parseInt(e.target.value) || 66));
