@@ -13,7 +13,7 @@
  */
 const MESI = ["Gennaio", "Febbraio", "Marzo", "Aprile", "Maggio", "Giugno",
   "Luglio", "Agosto", "Settembre", "Ottobre", "Novembre", "Dicembre"];
-const CARD_VERSION = "1.8.0";
+const CARD_VERSION = "1.9.0";
 console.info(`%c ENERGIA-CONSUMI-CARD %c v${CARD_VERSION} `,
   "color:#241200;background:#ff8a3d;font-weight:700;border-radius:4px 0 0 4px",
   "color:var(--eca-c-acc,#ffb020);background:#1a1b21;border-radius:0 4px 4px 0");
@@ -55,6 +55,7 @@ class EnergiaConsumiCard extends HTMLElement {
       // ottiene una card di solo archivio, o di sola classifica, da mettere
       // dove serve. Con tutti accesi e la card completa di prima.
       mostra_giorni: true,
+      mostra_confronto: true,  // +/-% rispetto al giorno prima
       mostra_record: true,
       mostra_ore: true,
       mostra_archivio: true,
@@ -150,15 +151,19 @@ class EnergiaConsumiCard extends HTMLElement {
     const { gridStat } = await this._prefsEnergia();
     const daysBack = parseInt(this._cfg.days_back) || 8;
     const now = new Date();
-    const start = new Date(now.getTime() - daysBack * 86400000);
+    const start = new Date(now);
+    start.setHours(0, 0, 0, 0);
+    start.setDate(start.getDate() - daysBack);
 
     const gres = await this._q([gridStat], start, now);
     const grows = (gres && gres[gridStat]) || [];
     const perDayHour = {};
+    const ultimaOra = {};
     for (const r of grows) {
       const t = new Date(r.start);
       let ch = r.change; if (ch == null || ch < 0) ch = 0;
       const k = this._dkey(t);
+      ultimaOra[k] = Math.max(ultimaOra[k] == null ? -1 : ultimaOra[k], t.getHours());
       (perDayHour[k] = perDayHour[k] || new Array(24).fill(0))[t.getHours()] = Math.round(ch * 1000) / 1000;
     }
     const perDay = {};
@@ -178,7 +183,7 @@ class EnergiaConsumiCard extends HTMLElement {
     else def = meta.length ? meta[meta.length - 1].date : null;
 
     // I dispositivi arrivano dopo: qui restano vuoti, e la card lo dice.
-    this._data = { meta, perDayHour, perDayRank: {}, perDayHourTop: {} };
+    this._data = { meta, perDayHour, ultimaOra, perDayRank: {}, perDayHourTop: {} };
     this._curDay = def;
     this._maxTot = Math.max(...meta.map(d => d.total), 0.001);
   }
@@ -367,6 +372,41 @@ class EnergiaConsumiCard extends HTMLElement {
   _dkey(d) { return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; }
 
   // ---- helpers presentazione ------------------------------------------------
+  // RISPETTO AL GIORNO PRIMA.
+  // Per un giorno finito e semplice: il suo totale contro quello del giorno
+  // prima. Per OGGI no: alle dieci del mattino oggi ha consumato meno di ieri
+  // per forza, perche ieri e finito e oggi no, e ogni mattina la card direbbe
+  // "-60%". Oggi si confronta con ieri FINO ALLA STESSA ORA.
+  _confronto(k) {
+    const d = this._data;
+    if (!d || !k) return null;
+    const g = new Date(k + "T12:00:00");
+    g.setDate(g.getDate() - 1);
+    const kPrima = this._dkey(g);
+    const prima = d.meta.find(x => x.date === kPrima);
+    const questo = d.meta.find(x => x.date === k);
+    if (!prima || !questo) return null;
+    let val = questo.total, rif = prima.total, fino = null;
+    if (k === this._dkey(new Date())) {
+      const L = d.ultimaOra ? d.ultimaOra[k] : null;
+      if (L == null || L < 0) return null;
+      const somma = (arr, n) => (arr || []).slice(0, n).reduce((a, b) => a + b, 0);
+      val = somma(d.perDayHour[k], L + 1);
+      rif = somma(d.perDayHour[kPrima], L + 1);
+      fino = L + 1;
+    }
+    if (!(rif > 0)) return null;
+    return { pct: (val - rif) / rif * 100, rif, fino };
+  }
+
+  // "+3%", "-12%", oppure "come ieri" quando la differenza e sotto l'uno:
+  // un +0% con la freccia in su dice una cosa che non e successa.
+  _pct(p) {
+    if (Math.abs(p) < 1) return { cls: "pari", txt: "=" };
+    const v = Math.round(Math.abs(p));
+    return p > 0 ? { cls: "su", txt: "\u25B2 " + v + "%" } : { cls: "giu", txt: "\u25BC " + v + "%" };
+  }
+
   _fmt(x) { return (Math.round(x * 100) / 100).toLocaleString("it-IT", { minimumFractionDigits: x < 10 ? 2 : 1, maximumFractionDigits: 2 }); }
   _fmtE(k) { return "≈ " + (k * (parseFloat(this._cfg.prezzo_kwh) || 0)).toLocaleString("it-IT", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " €"; }
   // I mesi di un anno si somigliano quasi tutti (qui vanno da 276 a 425 kWh):
@@ -414,13 +454,18 @@ class EnergiaConsumiCard extends HTMLElement {
     const blink = this._cfg.lampeggio_record;
 
     // giorni
+    const conf = this._cfg.mostra_confronto !== false;
     const daysHTML = d.meta.map(x => {
       const isRec = blink && x.total === this._maxTot;
       const pct = Math.max(6, Math.round(x.total / this._maxTot * 100));
+      const cf = conf ? this._confronto(x.date) : null;
+      const pv = cf ? this._pct(cf.pct) : null;
       return `<div class="eca-day${x.date === cur ? " sel" : ""}${isRec ? " rec" : ""}" data-day="${x.date}">
         ${isRec ? '<div class="eca-crown">👑</div>' : ""}<div class="eca-dl">${x.label}</div>
         <div class="eca-dk">${this._fmt(x.total)}<span class="eca-dku"> kWh</span></div>
-        <div class="eca-sp"><i style="width:${pct}%;background:${this._color(x.total, this._maxTot)}"></i></div></div>`;
+        <div class="eca-sp"><i style="width:${pct}%;background:${this._color(x.total, this._maxTot)}"></i></div>
+        ${pv ? `<div class="eca-dv ${pv.cls}" title="${cf.fino ? "rispetto a ieri alla stessa ora" : "rispetto al giorno prima"}">${pv.txt}${cf.fino ? '<span class="eca-dvo"> ora</span>' : ""}</div>`
+          : (conf ? '<div class="eca-dv vuoto">&nbsp;</div>' : "")}</div>`;
     }).join("");
 
     // ore
@@ -432,12 +477,21 @@ class EnergiaConsumiCard extends HTMLElement {
         <div class="eca-hl">${h % 3 === 0 ? String(h).padStart(2, "0") : ""}</div></div>`;
     }).join("");
 
-    const c = this._cfg;
+    const c = this._cfg, c0 = c;
     this._root.innerHTML = `
       <div class="eca-top">
         <div><h1>${this._esc(this._cfg.title)}</h1><div class="eca-sub">${day ? day.label : "—"}</div></div>
         <div class="eca-big"><div><span class="eca-n">${day ? this._fmt(day.total) : "0"}</span><span class="eca-u">kWh</span></div>
-          <div class="eca-cost">${day ? this._fmtE(day.total) : ""}</div><div class="eca-cap">totale giorno</div></div>
+          <div class="eca-cost">${day ? this._fmtE(day.total) : ""}</div><div class="eca-cap">totale giorno</div>
+          ${(() => {
+            const cf = c0.mostra_confronto !== false && day ? this._confronto(day.date) : null;
+            if (!cf) return "";
+            const pv = this._pct(cf.pct);
+            const dove = cf.fino
+              ? `rispetto a ieri alla stessa ora <small>(fino alle ${String(cf.fino).padStart(2, "0")}:00, ieri ${this._fmt(cf.rif)} kWh)</small>`
+              : `rispetto al giorno prima <small>(${this._fmt(cf.rif)} kWh)</small>`;
+            return `<div class="eca-conf ${pv.cls}">${pv.cls === "pari" ? "come il giorno prima" : pv.txt + " " + dove}</div>`;
+          })()}</div>
       </div>
       ${this._cfg.potenza_casa && customElements.get("mini-card")
         ? `<button type="button" class="eca-chiedi" data-chiedi>Fai una domanda alla casa</button>` : ""}
@@ -741,6 +795,19 @@ class EnergiaConsumiCard extends HTMLElement {
     .eca-day.rec{animation:ecapulse 1.9s ease-in-out infinite}
     .eca-day.rec .eca-dk{color:var(--eca-c-warm,#ffce8a)}
     .eca-crown{position:absolute;top:-7px;right:-4px;font-size:13px;filter:drop-shadow(0 1px 2px rgba(0,0,0,.6))}
+    /* Il confronto col giorno prima: rosso se si e consumato di piu, verde se
+       di meno. Piccolo, sotto la barra: e un'informazione in piu, non il
+       numero principale. */
+    .eca-dv{font-size:11px;font-weight:800;font-variant-numeric:tabular-nums;line-height:1;white-space:nowrap}
+    .eca-dv.su{color:#e5533b}
+    .eca-dv.giu{color:#1fa463}
+    .eca-dv.pari{color:var(--eca-muted)}
+    .eca-dvo{font-weight:700;font-size:9.5px;opacity:.75}
+    .eca-conf{margin-top:6px;font-size:12px;font-weight:800;text-align:right;line-height:1.35}
+    .eca-conf small{display:block;font-size:10.5px;font-weight:600;color:var(--eca-muted)}
+    .eca-conf.su{color:#e5533b}
+    .eca-conf.giu{color:#1fa463}
+    .eca-conf.pari{color:var(--eca-muted)}
     @keyframes ecapulse{0%,100%{box-shadow:0 0 0 1px rgba(255,84,66,.35),0 0 6px rgba(255,84,66,.15)}
       50%{box-shadow:0 0 0 1.6px rgba(255,84,66,.9),0 0 16px rgba(255,84,66,.55)}}
     .eca-chip{display:flex;align-items:center;gap:10px;padding:11px 14px;border-radius:16px;cursor:pointer;
@@ -945,6 +1012,7 @@ class EnergiaConsumiCardEditor extends HTMLElement {
       <div class="fld"><label>Cosa mostra questa card</label>
         <span class="h">Servono per dividere: lasciando acceso un pezzo solo ottieni una card di solo archivio, o di sola classifica, e la metti dove vuoi. Con tutti accesi e la card completa.</span></div>
       <div class="sw">📆 La fila dei giorni<input type="checkbox" id="f_mgiorni" ${g("mostra_giorni",true)?"checked":""}></div>
+      <div class="sw">📈 Percentuale rispetto al giorno prima<input type="checkbox" id="f_mconf" ${g("mostra_confronto",true)?"checked":""}></div>
       <div class="sw">👑 Il giorno record<input type="checkbox" id="f_mrecord" ${g("mostra_record",true)?"checked":""}></div>
       <div class="sw">🕐 Consumo per ora<input type="checkbox" id="f_more" ${g("mostra_ore",true)?"checked":""}></div>
       <div class="sw">📅 Archivio anni e mesi<input type="checkbox" id="f_marchivio" ${g("mostra_archivio",true)?"checked":""}></div>
@@ -964,6 +1032,7 @@ class EnergiaConsumiCardEditor extends HTMLElement {
     on("#f_shigh", "change", e => this._set("soglia_alta", parseInt(e.target.value) || 66));
     on("#f_blink", "change", e => this._set("lampeggio_record", e.target.checked));
     on("#f_mgiorni", "change", e => this._set("mostra_giorni", e.target.checked));
+    on("#f_mconf", "change", e => this._set("mostra_confronto", e.target.checked));
     on("#f_mrecord", "change", e => this._set("mostra_record", e.target.checked));
     on("#f_more", "change", e => this._set("mostra_ore", e.target.checked));
     on("#f_marchivio", "change", e => this._set("mostra_archivio", e.target.checked));
