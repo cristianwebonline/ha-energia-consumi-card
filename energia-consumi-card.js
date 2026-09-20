@@ -13,7 +13,7 @@
  */
 const MESI = ["Gennaio", "Febbraio", "Marzo", "Aprile", "Maggio", "Giugno",
   "Luglio", "Agosto", "Settembre", "Ottobre", "Novembre", "Dicembre"];
-const CARD_VERSION = "1.9.0";
+const CARD_VERSION = "1.10.0";
 console.info(`%c ENERGIA-CONSUMI-CARD %c v${CARD_VERSION} `,
   "color:#241200;background:#ff8a3d;font-weight:700;border-radius:4px 0 0 4px",
   "color:var(--eca-c-acc,#ffb020);background:#1a1b21;border-radius:0 4px 4px 0");
@@ -767,6 +767,19 @@ class EnergiaConsumiCard extends HTMLElement {
       display:flex;flex-direction:column;gap:14px;padding:4px}
     .eca *{box-sizing:border-box}
     .eca h1{margin:0;font-size:18px;font-weight:800;letter-spacing:-.2px}
+    /* L'INTESTAZIONE SU UN TELEFONO. Titolo a sinistra e numeri a destra
+       stanno bene su un monitor; su un telefono il blocco dei numeri — con
+       dentro anche il confronto con ieri — si prendeva due terzi della riga e
+       il titolo andava a capo in mezzo alla parola. Sotto una certa larghezza
+       si impilano: prima il titolo, poi i numeri, ognuno con la sua riga
+       intera. */
+    .eca{container-type:inline-size}
+    .eca h1{font-size:clamp(15px,4.8cqw,19px);line-height:1.2}
+    @container (max-width: 460px){
+      .eca-top{flex-direction:column;align-items:flex-start;gap:6px}
+      .eca-big{text-align:left;width:100%}
+      .eca-cap{margin-top:2px}
+    }
     .eca h2{margin:0 0 2px;font-size:14px;font-weight:800}
     .eca-top{display:flex;align-items:flex-end;justify-content:space-between;gap:12px;padding:2px}
     .eca-sub{margin-top:3px;font-size:12px;color:var(--eca-muted);font-weight:500}
